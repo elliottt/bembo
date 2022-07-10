@@ -24,10 +24,14 @@ private:
         Line = 1,
         Text = 2,
         Concat = 3,
+        Choice = 4,
     };
 
     Tag tag() const;
     void *data() const;
+
+    template <typename T> T &cast();
+    template <typename T> const T &cast() const;
 
     void increment();
     bool decrement();
@@ -48,11 +52,18 @@ public:
     Doc();
     static Doc nil();
 
-    Doc(std::string str);
-    static Doc text(std::string str);
+    static Doc s(std::string str);
+    static Doc sv(std::string_view str);
 
     Doc(Doc left, Doc right);
     Doc operator+(Doc other) const;
+
+    // Render the document out assuming a line length of `cols`.
+    template <typename T>
+    void render(T &target, int cols) const;
+
+    // Render to a string.
+    std::string pretty(int cols) const;
 };
 
 } // namespace bembo

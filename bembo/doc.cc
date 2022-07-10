@@ -1,6 +1,9 @@
 #include <cstdint>
+#include <queue>
 
 #include "doc.h"
+
+using namespace std::literals::string_view_literals;
 
 namespace bembo {
 
@@ -22,6 +25,12 @@ struct Concat final {
     Doc right;
 };
 
+// NOTE: the left side is always flattened implicitly, so lines will be interpreted as a single space.
+struct Choice final {
+    Doc left;
+    Doc right;
+};
+
 } // namespace
 
 Doc::Tag Doc::tag() const {
@@ -30,6 +39,14 @@ Doc::Tag Doc::tag() const {
 
 void *Doc::data() const {
     return reinterpret_cast<void *>(this->value >> TAG_MASK_BITS);
+}
+
+template <typename T> T &Doc::cast() {
+    return *reinterpret_cast<T *>(this->data());
+}
+
+template <typename T> const T &Doc::cast() const {
+    return *reinterpret_cast<T *>(this->data());
 }
 
 void Doc::increment() {
@@ -57,6 +74,13 @@ void Doc::cleanup() {
         if (this->decrement()) {
             delete this->refs;
             delete static_cast<Concat *>(this->data());
+        }
+        return;
+
+    case Tag::Choice:
+        if (this->decrement()) {
+            delete this->refs;
+            delete static_cast<Choice *>(this->data());
         }
         return;
     }
@@ -127,10 +151,12 @@ Doc Doc::nil() {
     return Doc{};
 }
 
-Doc::Doc(std::string str) : Doc{new std::atomic<int>(0), Tag::Text, new Text{std::move(str)}} {}
+Doc Doc::s(std::string str) {
+    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::move(str)}};
+}
 
-Doc Doc::text(std::string str) {
-    return Doc{str};
+Doc Doc::sv(std::string_view str) {
+    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::string(str)}};
 }
 
 Doc::Doc(Doc left, Doc right)
@@ -138,6 +164,65 @@ Doc::Doc(Doc left, Doc right)
 
 Doc Doc::operator+(Doc other) const {
     return Doc{*this, std::move(other)};
+}
+
+template <typename T> void Doc::render(T &out, int cols) const {
+    std::string buffer;
+
+    std::queue<const Doc *> work;
+
+    work.push(this);
+
+    while (!work.empty()) {
+        auto *node = work.front();
+        work.pop();
+
+        switch (node->tag()) {
+        case Tag::Nil:
+            break;
+
+        case Tag::Line:
+            out.line();
+            break;
+
+        case Tag::Text:
+            out.write(node->cast<Text>().text);
+            break;
+
+        case Tag::Concat: {
+            auto &cat = node->cast<Concat>();
+            work.push(&cat.left);
+            work.push(&cat.right);
+            break;
+        }
+
+        case Tag::Choice:
+            break;
+        }
+    }
+}
+
+namespace {
+
+// A simple renderer for collecting the output in a buffer.
+struct StringRenderer {
+    std::string buffer;
+
+    void line() {
+        this->buffer.push_back('\n');
+    }
+
+    void write(std::string_view sv) {
+        this->buffer.append(sv);
+    }
+};
+
+} // namespace
+
+std::string Doc::pretty(int cols) const {
+    StringRenderer out;
+    this->render(out, cols);
+    return out.buffer;
 }
 
 } // namespace bembo
