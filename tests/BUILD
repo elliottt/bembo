@@ -2,7 +2,7 @@
 cc_test(
     name = "tests",
     srcs = ["tests.cc"],
-    copts = ["-std=c++17"],
+    copts = ["-std=c++20"],
     deps = [
         "//bembo",
         "@doctest//doctest",

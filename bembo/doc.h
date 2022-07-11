@@ -1,6 +1,7 @@
-#ifndef PPRINT_DOC_H
-#define PPRINT_DOC_H
+#ifndef BEMBO_DOC_H
+#define BEMBO_DOC_H
 
+#include <numeric>
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -19,6 +20,7 @@ private:
     // +--------------------+----------------+
     uint64_t value;
 
+    // TODO: char variant that puts the character in the pointer bits
     enum class Tag : uint16_t {
         Nil = 0,
         Line = 1,
@@ -51,20 +53,50 @@ public:
 
     Doc();
     static Doc nil();
+    static Doc line();
 
     static Doc s(std::string str);
     static Doc sv(std::string_view str);
 
     Doc(Doc left, Doc right);
     Doc operator+(Doc other) const;
+    Doc &operator+=(Doc other);
+
+    static Doc group(Doc other);
 
     // Render the document out assuming a line length of `cols`.
-    template <typename T>
-    void render(T &target, int cols) const;
+    template <typename T> void render(T &target, int cols) const;
 
     // Render to a string.
     std::string pretty(int cols) const;
 };
+
+template <typename It, typename Sentinel> Doc join(It &&begin, Sentinel &&end) {
+    return std::accumulate(std::forward<It>(begin), std::forward<Sentinel>(end), Doc::nil());
+}
+
+template <typename It, typename Sentinel>
+Doc sep(Doc sep, It &&begin, Sentinel &&end) {
+    Doc res;
+
+    if (begin == end) {
+        return res;
+    }
+
+    while (true) {
+        Doc chunk = *begin;
+        ++begin;
+
+        if (begin == end) {
+            res += chunk;
+            break;
+        }
+
+        res += Doc::group(chunk + sep);
+    }
+
+    return res;
+}
 
 } // namespace bembo
 

@@ -1,5 +1,5 @@
 #include <cstdint>
-#include <queue>
+#include <vector>
 
 #include "doc.h"
 
@@ -142,13 +142,17 @@ Doc::Doc(Tag tag) : refs{nullptr}, value{static_cast<uint64_t>(tag)} {}
 
 // Initialization of a variant that lives in the heap.
 Doc::Doc(std::atomic<int> *refs, Tag tag, void *ptr) : refs{refs}, value{make_tagged(static_cast<uint16_t>(tag), ptr)} {
-    (*this->refs)++;
+    this->increment();
 }
 
 Doc::Doc() : Doc(Tag::Nil) {}
 
 Doc Doc::nil() {
     return Doc{};
+}
+
+Doc Doc::line() {
+    return Doc{Tag::Line};
 }
 
 Doc Doc::s(std::string str) {
@@ -166,16 +170,24 @@ Doc Doc::operator+(Doc other) const {
     return Doc{*this, std::move(other)};
 }
 
+Doc &Doc::operator+=(Doc other) {
+    *this = Doc{std::move(*this), std::move(other)};
+    return *this;
+}
+
+Doc Doc::group(Doc doc) {
+    // TODO: flatten doc | doc
+    return doc;
+}
+
 template <typename T> void Doc::render(T &out, int cols) const {
     std::string buffer;
 
-    std::queue<const Doc *> work;
-
-    work.push(this);
+    std::vector<const Doc *> work{this};
 
     while (!work.empty()) {
-        auto *node = work.front();
-        work.pop();
+        auto *node = work.back();
+        work.pop_back();
 
         switch (node->tag()) {
         case Tag::Nil:
@@ -191,8 +203,8 @@ template <typename T> void Doc::render(T &out, int cols) const {
 
         case Tag::Concat: {
             auto &cat = node->cast<Concat>();
-            work.push(&cat.left);
-            work.push(&cat.right);
+            work.push_back(&cat.right);
+            work.push_back(&cat.left);
             break;
         }
 
