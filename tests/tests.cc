@@ -1,6 +1,6 @@
 #include "doctest/doctest.h"
+#include <array>
 #include <string>
-#include <vector>
 
 #include "bembo/doc.h"
 #include "bembo/ranges.h"
@@ -32,17 +32,30 @@ TEST_CASE("line") {
 }
 
 TEST_CASE("join") {
-    std::vector<Doc> docs{Doc::sv("a"), Doc::sv("b"), Doc::sv("c")};
+    std::array<Doc, 3> docs{Doc::sv("a"), Doc::sv("b"), Doc::sv("c")};
 
     check_pretty("abc", bembo::join(docs.begin(), docs.end()));
     check_pretty("abc", bembo::join(docs));
 }
 
 TEST_CASE("sep") {
-    std::vector<Doc> docs{Doc::sv("a"), Doc::sv("b"), Doc::sv("c")};
+    std::array<Doc, 3> docs{Doc::sv("a"), Doc::sv("b"), Doc::sv("c")};
 
     check_pretty("a, b, c", bembo::sep(Doc::sv(", "), docs.begin(), docs.end()));
     check_pretty("a, b, c", bembo::sep(Doc::sv(", "), docs));
+}
+
+TEST_CASE("softline") {
+    auto d = Doc::sv("hello");
+
+    check_pretty("hello hello", d + Doc::softline() + d);
+    check_pretty("hello\nhello", d + Doc::softline() + d, 5);
+
+    std::array<Doc, 3> docs{Doc::sv("a"), Doc::sv("b"), Doc::sv("c")};
+    check_pretty("a b c", bembo::sep(Doc::softline(), docs));
+    check_pretty("a\nb\nc", bembo::sep(Doc::softline(), docs), 1);
+    check_pretty("a\nb\nc", bembo::sep(Doc::softline(), docs), 2);
+    check_pretty("a b\nc", bembo::sep(Doc::softline(), docs), 3);
 }
 
 } // namespace bembo

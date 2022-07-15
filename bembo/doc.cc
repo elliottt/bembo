@@ -145,6 +145,10 @@ Doc::Doc(std::atomic<int> *refs, Tag tag, void *ptr) : refs{refs}, value{make_ta
     this->increment();
 }
 
+Doc Doc::choice(Doc left, Doc right) {
+    return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right)}};
+}
+
 Doc::Doc() : Doc(Tag::Nil) {}
 
 Doc Doc::nil() {
@@ -153,6 +157,14 @@ Doc Doc::nil() {
 
 Doc Doc::line() {
     return Doc{Tag::Line};
+}
+
+Doc Doc::softline() {
+    return Doc::choice(Doc::c(' '), Doc::line());
+}
+
+Doc Doc::c(char c) {
+    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::string(1, c)}};
 }
 
 Doc Doc::s(std::string str) {
@@ -176,40 +188,167 @@ Doc &Doc::operator+=(Doc other) {
 }
 
 Doc Doc::group(Doc doc) {
-    // TODO: flatten doc | doc
-    return doc;
+    // This looks odd but the behavior of choice is to always flatten the left branch. The result is equivalent to:
+    // > flatten doc | doc
+    return Doc::choice(doc, doc);
 }
 
-template <typename T> void Doc::render(T &out, int cols) const {
-    std::string buffer;
+namespace {
 
-    std::vector<const Doc *> work{this};
+struct Node {
+    const Doc *doc;
+    bool flattening;
 
-    while (!work.empty()) {
-        auto *node = work.back();
-        work.pop_back();
+    Node(const Doc *doc, bool flattening) : doc{doc}, flattening{flattening} {}
+};
+}
 
-        switch (node->tag()) {
-        case Tag::Nil:
+class Fits final {
+public:
+    using Iterator = std::vector<Node>::const_reverse_iterator;
+
+    const int width;
+    int col;
+
+    // Iterators from the DocRenderer to consume doc parts that trail a choice
+    Iterator it;
+    Iterator end;
+
+    std::vector<Node> work;
+
+    Fits(const int width, int col, Iterator it, Iterator end) : width{width}, col{col}, it{it}, end{end} {}
+
+    bool advance() {
+        if (this->it == this->end) {
+            return false;
+        }
+
+        this->work.emplace_back(*this->it);
+        ++this->it;
+
+        return true;
+    }
+
+    bool check(const Doc *doc) {
+        this->work.emplace_back(doc, true);
+
+        do {
+            while (!this->work.empty()) {
+                auto node = this->work.back();
+                this->work.pop_back();
+
+                switch (node.doc->tag()) {
+                case Doc::Tag::Nil:
+                    break;
+
+                case Doc::Tag::Line: {
+                    if (node.flattening) {
+                        this->col += 1;
+                    } else {
+                        return true;
+                    }
+                    break;
+                }
+
+                case Doc::Tag::Text: {
+                    auto &text = node.doc->cast<Text>().text;
+                    this->col += text.size();
+
+                    if (this->col > this->width) {
+                        return false;
+                    }
+
+                    break;
+                }
+
+                case Doc::Tag::Concat: {
+                    auto &cat = node.doc->cast<Concat>();
+                    this->work.emplace_back(&cat.right, node.flattening);
+                    this->work.emplace_back(&cat.left, node.flattening);
+                    break;
+                }
+
+                case Doc::Tag::Choice:
+                    auto &choice = node.doc->cast<Choice>();
+                    // TODO: figure out how to avoid allocating a whole extra `Fits` here
+                    Fits nested{*this};
+                    if (nested.check(&choice.left)) {
+                        this->work.emplace_back(&choice.left, true);
+                    } else {
+                        this->work.emplace_back(&choice.right, node.flattening);
+                    }
+                    break;
+                }
+            }
+        } while (this->advance());
+
+        return true;
+    }
+};
+
+class DocRenderer final {
+public:
+    const int width;
+    Renderer &out;
+
+    int col = 0;
+
+    DocRenderer(const int width, Renderer &out) : width{width}, out{out} {}
+
+    std::vector<Node> work{};
+
+    void render(const Doc *doc);
+};
+
+void DocRenderer::render(const Doc *doc) {
+    this->work.clear();
+    this->work.emplace_back(doc, false);
+
+    while (!this->work.empty()) {
+        auto node = this->work.back();
+        this->work.pop_back();
+
+        switch (node.doc->tag()) {
+        case Doc::Tag::Nil:
             break;
 
-        case Tag::Line:
-            out.line();
-            break;
+        case Doc::Tag::Line: {
+            if (node.flattening) {
+                this->col += 1;
+                this->out.write(" ");
+            } else {
+                this->col = 0;
+                this->out.line();
+            }
 
-        case Tag::Text:
-            out.write(node->cast<Text>().text);
-            break;
-
-        case Tag::Concat: {
-            auto &cat = node->cast<Concat>();
-            work.push_back(&cat.right);
-            work.push_back(&cat.left);
             break;
         }
 
-        case Tag::Choice:
+        case Doc::Tag::Text: {
+            auto &text = node.doc->cast<Text>().text;
+            this->col += text.size();
+            this->out.write(text);
             break;
+        }
+
+        case Doc::Tag::Concat: {
+            auto &cat = node.doc->cast<Concat>();
+            this->work.emplace_back(&cat.right, node.flattening);
+            this->work.emplace_back(&cat.left, node.flattening);
+            break;
+        }
+
+        case Doc::Tag::Choice: {
+            auto &choice = node.doc->cast<Choice>();
+
+            Fits fit{this->width, this->col, this->work.rbegin(), this->work.rend()};
+            if (fit.check(&choice.left)) {
+                this->work.emplace_back(&choice.left, true);
+            } else {
+                this->work.emplace_back(&choice.right, node.flattening);
+            }
+            break;
+        }
         }
     }
 }
@@ -217,19 +356,24 @@ template <typename T> void Doc::render(T &out, int cols) const {
 namespace {
 
 // A simple renderer for collecting the output in a buffer.
-struct StringRenderer {
+struct StringRenderer final : public Renderer {
     std::string buffer;
 
-    void line() {
+    void line() override {
         this->buffer.push_back('\n');
     }
 
-    void write(std::string_view sv) {
+    void write(std::string_view sv) override {
         this->buffer.append(sv);
     }
 };
 
 } // namespace
+
+void Doc::render(Renderer &out, int cols) const {
+    DocRenderer r{cols, out};
+    r.render(this);
+}
 
 std::string Doc::pretty(int cols) const {
     StringRenderer out;
