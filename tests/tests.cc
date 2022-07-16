@@ -45,6 +45,13 @@ TEST_CASE("sep") {
     check_pretty("a, b, c", bembo::sep(Doc::sv(", "), docs));
 }
 
+TEST_CASE("nest") {
+    auto hello = Doc::sv("hello");
+    auto world = Doc::sv("world");
+
+    check_pretty("hello\n  world", hello + Doc::nest(2, Doc::line() + world));
+}
+
 TEST_CASE("softline") {
     auto d = Doc::sv("hello");
 

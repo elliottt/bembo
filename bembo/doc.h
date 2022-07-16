@@ -12,7 +12,10 @@ class Renderer {
 public:
     virtual ~Renderer() = default;
 
-    virtual void line() = 0;
+    // Emit a newline, and indent by `indent` spaces.
+    virtual void line(int indent) = 0;
+
+    // Emit the string.
     virtual void write(std::string_view sv) = 0;
 };
 
@@ -43,6 +46,7 @@ private:
         Text = 0x1,
         Concat = 0x3,
         Choice = 0x5,
+        Nest = 0x7,
     };
 
     Tag tag() const;
@@ -83,10 +87,19 @@ public:
     static Doc sv(std::string_view str);
 
     Doc(Doc left, Doc right);
+    Doc append(Doc other) const;
     Doc operator+(Doc other) const;
     Doc &operator+=(Doc other);
 
+    // Append with a space between.
+    Doc operator<<(Doc other) const;
+
+    static Doc nest(int level, Doc other);
     static Doc group(Doc other);
+
+    bool is_nil() const {
+        return this->tag() == Tag::Nil;
+    }
 
     // Render the document out assuming a line length of `cols`.
     void render(Renderer &target, int cols) const;

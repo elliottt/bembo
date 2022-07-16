@@ -33,6 +33,11 @@ struct Choice final {
     bool flattening;
 };
 
+struct Nest final {
+    Doc doc;
+    int indent;
+};
+
 } // namespace
 
 Doc::Tag Doc::tag() const {
@@ -90,6 +95,13 @@ void Doc::cleanup() {
         if (this->decrement()) {
             delete this->refs;
             delete static_cast<Choice *>(this->data());
+        }
+        return;
+
+    case Tag::Nest:
+        if (this->decrement()) {
+            delete this->refs;
+            delete static_cast<Nest *>(this->data());
         }
         return;
     }
@@ -209,13 +221,29 @@ Doc Doc::sv(std::string_view str) {
 Doc::Doc(Doc left, Doc right)
     : Doc{new std::atomic<int>(0), Tag::Concat, new Concat{std::move(left), std::move(right)}} {}
 
-Doc Doc::operator+(Doc other) const {
+Doc Doc::append(Doc other) const {
+    if (this->is_nil()) {
+        return other;
+    }
+
+    if (other.is_nil()) {
+        return *this;
+    }
+
     return Doc{*this, std::move(other)};
+}
+
+Doc Doc::operator+(Doc other) const {
+    return this->append(other);
 }
 
 Doc &Doc::operator+=(Doc other) {
     *this = Doc{std::move(*this), std::move(other)};
     return *this;
+}
+
+Doc Doc::operator<<(Doc other) const {
+    return this->append(Doc::c(' ') + other);
 }
 
 Doc Doc::group(Doc doc) {
@@ -224,13 +252,18 @@ Doc Doc::group(Doc doc) {
     return Doc::choice(true, doc, doc);
 }
 
+Doc Doc::nest(int indent, Doc doc) {
+    return Doc{new std::atomic<int>(0), Tag::Nest, new Nest{std::move(doc), indent}};
+}
+
 namespace {
 
 struct Node {
     const Doc *doc;
+    int indent;
     bool flattening;
 
-    Node(const Doc *doc, bool flattening) : doc{doc}, flattening{flattening} {}
+    Node(const Doc *doc, int indent, bool flattening) : doc{doc}, indent{indent}, flattening{flattening} {}
 };
 } // namespace
 
@@ -260,8 +293,10 @@ public:
         return true;
     }
 
+    // Check to see if a Doc will fit in he space remaining on a line.
+    // NOTE: this check completely ignores indentation, as newlines terminate the check.
     bool check(const Doc *doc, bool flattening) {
-        this->work.emplace_back(doc, flattening);
+        this->work.emplace_back(doc, 0, flattening);
 
         do {
             while (!this->work.empty()) {
@@ -304,21 +339,28 @@ public:
 
                 case Doc::Tag::Concat: {
                     auto &cat = node.doc->cast<Concat>();
-                    this->work.emplace_back(&cat.right, node.flattening);
-                    this->work.emplace_back(&cat.left, node.flattening);
+                    this->work.emplace_back(&cat.right, 0, node.flattening);
+                    this->work.emplace_back(&cat.left, 0, node.flattening);
                     break;
                 }
 
-                case Doc::Tag::Choice:
+                case Doc::Tag::Choice: {
                     auto &choice = node.doc->cast<Choice>();
                     // TODO: figure out how to avoid allocating a whole extra `Fits` here
                     Fits nested{*this};
                     if (nested.check(&choice.left, choice.flattening)) {
-                        this->work.emplace_back(&choice.left, true);
+                        this->work.emplace_back(&choice.left, 0, true);
                     } else {
-                        this->work.emplace_back(&choice.right, node.flattening);
+                        this->work.emplace_back(&choice.right, 0, node.flattening);
                     }
                     break;
+                }
+
+                case Doc::Tag::Nest: {
+                    auto &nest = node.doc->cast<Nest>();
+                    this->work.emplace_back(&nest.doc, 0, node.flattening);
+                    break;
+                }
                 }
             }
         } while (this->advance());
@@ -343,7 +385,7 @@ public:
 
 void DocRenderer::render(const Doc *doc) {
     this->work.clear();
-    this->work.emplace_back(doc, false);
+    this->work.emplace_back(doc, 0, false);
 
     while (!this->work.empty()) {
         auto node = this->work.back();
@@ -359,7 +401,7 @@ void DocRenderer::render(const Doc *doc) {
                 this->out.write(" ");
             } else {
                 this->col = 0;
-                this->out.line();
+                this->out.line(node.indent);
             }
 
             break;
@@ -381,23 +423,29 @@ void DocRenderer::render(const Doc *doc) {
 
         case Doc::Tag::Concat: {
             auto &cat = node.doc->cast<Concat>();
-            this->work.emplace_back(&cat.right, node.flattening);
-            this->work.emplace_back(&cat.left, node.flattening);
+            this->work.emplace_back(&cat.right, node.indent, node.flattening);
+            this->work.emplace_back(&cat.left, node.indent, node.flattening);
             break;
         }
 
         case Doc::Tag::Choice: {
             auto &choice = node.doc->cast<Choice>();
             if (node.flattening) {
-                this->work.emplace_back(&choice.left, true);
+                this->work.emplace_back(&choice.left, node.indent, true);
             } else {
                 Fits fit{this->width, this->col, this->work.rbegin(), this->work.rend()};
                 if (fit.check(&choice.left, choice.flattening)) {
-                    this->work.emplace_back(&choice.left, choice.flattening);
+                    this->work.emplace_back(&choice.left, node.indent, choice.flattening);
                 } else {
-                    this->work.emplace_back(&choice.right, false);
+                    this->work.emplace_back(&choice.right, node.indent, false);
                 }
             }
+            break;
+        }
+
+        case Doc::Tag::Nest: {
+            auto &nest = node.doc->cast<Nest>();
+            this->work.emplace_back(&nest.doc, node.indent + nest.indent, node.flattening);
             break;
         }
         }
@@ -410,8 +458,9 @@ namespace {
 struct StringRenderer final : public Renderer {
     std::string buffer;
 
-    void line() override {
+    void line(int indent) override {
         this->buffer.push_back('\n');
+        this->buffer.append(indent, ' ');
     }
 
     void write(std::string_view sv) override {
