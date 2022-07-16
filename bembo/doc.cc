@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "doc.h"
@@ -49,8 +50,14 @@ template <typename T> const T &Doc::cast() const {
     return *reinterpret_cast<T *>(this->data());
 }
 
+bool Doc::boxed() const {
+    return this->value & 0x1;
+}
+
 void Doc::increment() {
-    this->refs->fetch_add(1);
+    if (this->boxed()) {
+        this->refs->fetch_add(1);
+    }
 }
 
 bool Doc::decrement() {
@@ -61,6 +68,7 @@ void Doc::cleanup() {
     switch (this->tag()) {
     case Tag::Nil:
     case Tag::Line:
+    case Tag::ShortText:
         return;
 
     case Tag::Text:
@@ -91,7 +99,7 @@ Doc::~Doc() {
 }
 
 Doc::Doc(const Doc &other) : refs{other.refs}, value{other.value} {
-    if (this->refs != nullptr) {
+    if (this->boxed()) {
         this->increment();
     }
 }
@@ -101,14 +109,14 @@ Doc &Doc::operator=(const Doc &other) {
         return *this;
     }
 
-    if (this->refs != nullptr) {
+    if (this->boxed()) {
         this->cleanup();
     }
 
     this->refs = other.refs;
     this->value = other.value;
 
-    if (this->refs) {
+    if (this->boxed()) {
         this->increment();
     }
 
@@ -125,7 +133,7 @@ Doc &Doc::operator=(Doc &&other) {
         return *this;
     }
 
-    if (this->refs != nullptr) {
+    if (this->boxed()) {
         this->cleanup();
     }
 
@@ -149,6 +157,25 @@ Doc Doc::choice(Doc left, Doc right) {
     return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right)}};
 }
 
+// Construct a short text node. This assumes that the string is 8 chars or less.
+Doc Doc::short_text(std::string_view text) {
+    Doc res{Tag::ShortText};
+
+    auto size = std::min(text.size(), 8ul);
+
+    res.value |= static_cast<uint64_t>(size << 8);
+
+    memcpy(&res.refs, text.data(), size);
+
+    return res;
+}
+
+std::string_view Doc::get_short_text() const {
+    const char *ptr = reinterpret_cast<const char *>(&this->refs);
+    auto size = (this->value >> 8) & 0xff;
+    return std::string_view{ptr, size};
+}
+
 Doc::Doc() : Doc(Tag::Nil) {}
 
 Doc Doc::nil() {
@@ -164,7 +191,7 @@ Doc Doc::softline() {
 }
 
 Doc Doc::c(char c) {
-    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::string(1, c)}};
+    return Doc::short_text(std::string_view{&c, 1});
 }
 
 Doc Doc::s(std::string str) {
@@ -172,7 +199,11 @@ Doc Doc::s(std::string str) {
 }
 
 Doc Doc::sv(std::string_view str) {
-    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::string(str)}};
+    if (str.size() <= 8) {
+        return Doc::short_text(str);
+    } else {
+        return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::string(str)}};
+    }
 }
 
 Doc::Doc(Doc left, Doc right)
@@ -201,7 +232,7 @@ struct Node {
 
     Node(const Doc *doc, bool flattening) : doc{doc}, flattening{flattening} {}
 };
-}
+} // namespace
 
 class Fits final {
 public:
@@ -246,6 +277,16 @@ public:
                         this->col += 1;
                     } else {
                         return true;
+                    }
+                    break;
+                }
+
+                case Doc::Tag::ShortText: {
+                    auto text = node.doc->get_short_text();
+                    this->col += text.size();
+
+                    if (this->col > this->width) {
+                        return false;
                     }
                     break;
                 }
@@ -321,6 +362,13 @@ void DocRenderer::render(const Doc *doc) {
                 this->out.line();
             }
 
+            break;
+        }
+
+        case Doc::Tag::ShortText: {
+            auto text = node.doc->get_short_text();
+            this->col += text.size();
+            this->out.write(text);
             break;
         }
 

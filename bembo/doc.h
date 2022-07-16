@@ -26,18 +26,20 @@ private:
 
     // Optional pointer + tag in the following format:
     // 63                                    0
-    // +--------------------+----------------+
-    // | 48 bits of pointer | 16 bits of tag |
-    // +--------------------+----------------+
+    // +--------------------+------------------------+---------------+
+    // | 48 bits of pointer | 8 bits of short length |16 bits of tag |
+    // +--------------------+------------------------+---------------+
     uint64_t value;
 
-    // TODO: char variant that puts the character in the pointer bits
-    enum class Tag : uint16_t {
-        Nil = 0,
-        Line = 1,
-        Text = 2,
-        Concat = 3,
-        Choice = 4,
+    enum class Tag : uint8_t {
+        Nil       = 0x0,
+        Line      = 0x2,
+        ShortText = 0x4,
+
+        // nodes that count refs are odd
+        Text      = 0x1,
+        Concat    = 0x3,
+        Choice    = 0x5,
     };
 
     Tag tag() const;
@@ -46,13 +48,19 @@ private:
     template <typename T> T &cast();
     template <typename T> const T &cast() const;
 
+    bool boxed() const;
     void increment();
     bool decrement();
     void cleanup();
 
     Doc(Tag tag);
     Doc(std::atomic<int> *refs, Tag tag, void *ptr);
+
     static Doc choice(Doc left, Doc right);
+
+    static Doc short_text(std::string_view text);
+
+    std::string_view get_short_text() const;
 
 public:
     ~Doc();
