@@ -30,6 +30,7 @@ struct Concat final {
 struct Choice final {
     Doc left;
     Doc right;
+    bool flattening;
 };
 
 } // namespace
@@ -153,8 +154,8 @@ Doc::Doc(std::atomic<int> *refs, Tag tag, void *ptr) : refs{refs}, value{make_ta
     this->increment();
 }
 
-Doc Doc::choice(Doc left, Doc right) {
-    return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right)}};
+Doc Doc::choice(bool flattening, Doc left, Doc right) {
+    return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right), flattening}};
 }
 
 // Construct a short text node. This assumes that the string is 8 chars or less.
@@ -187,7 +188,7 @@ Doc Doc::line() {
 }
 
 Doc Doc::softline() {
-    return Doc::choice(Doc::c(' '), Doc::line());
+    return Doc::choice(false, Doc::c(' '), Doc::line());
 }
 
 Doc Doc::c(char c) {
@@ -221,7 +222,7 @@ Doc &Doc::operator+=(Doc other) {
 Doc Doc::group(Doc doc) {
     // This looks odd but the behavior of choice is to always flatten the left branch. The result is equivalent to:
     // > flatten doc | doc
-    return Doc::choice(doc, doc);
+    return Doc::choice(true, doc, doc);
 }
 
 namespace {
@@ -260,8 +261,8 @@ public:
         return true;
     }
 
-    bool check(const Doc *doc) {
-        this->work.emplace_back(doc, true);
+    bool check(const Doc *doc, bool flattening) {
+        this->work.emplace_back(doc, flattening);
 
         do {
             while (!this->work.empty()) {
@@ -313,7 +314,7 @@ public:
                     auto &choice = node.doc->cast<Choice>();
                     // TODO: figure out how to avoid allocating a whole extra `Fits` here
                     Fits nested{*this};
-                    if (nested.check(&choice.left)) {
+                    if (nested.check(&choice.left, choice.flattening)) {
                         this->work.emplace_back(&choice.left, true);
                     } else {
                         this->work.emplace_back(&choice.right, node.flattening);
@@ -388,12 +389,15 @@ void DocRenderer::render(const Doc *doc) {
 
         case Doc::Tag::Choice: {
             auto &choice = node.doc->cast<Choice>();
-
-            Fits fit{this->width, this->col, this->work.rbegin(), this->work.rend()};
-            if (fit.check(&choice.left)) {
+            if (node.flattening) {
                 this->work.emplace_back(&choice.left, true);
             } else {
-                this->work.emplace_back(&choice.right, node.flattening);
+                Fits fit{this->width, this->col, this->work.rbegin(), this->work.rend()};
+                if (fit.check(&choice.left, choice.flattening)) {
+                    this->work.emplace_back(&choice.left, choice.flattening);
+                } else {
+                    this->work.emplace_back(&choice.right, false);
+                }
             }
             break;
         }

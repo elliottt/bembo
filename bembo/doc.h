@@ -55,8 +55,7 @@ private:
 
     Doc(Tag tag);
     Doc(std::atomic<int> *refs, Tag tag, void *ptr);
-
-    static Doc choice(Doc left, Doc right);
+    static Doc choice(bool flattening, Doc left, Doc right);
 
     static Doc short_text(std::string_view text);
 
