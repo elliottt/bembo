@@ -22,7 +22,10 @@ private:
     friend class DocRenderer;
 
     // Shared refcount for when the tag of `data` doesn't indicate an inlined case.
-    std::atomic<int> *refs;
+    union {
+        char short_text_data[8];
+        std::atomic<int> *refs;
+    };
 
     // Optional pointer + tag in the following format:
     // 63                                    0
@@ -32,14 +35,14 @@ private:
     uint64_t value;
 
     enum class Tag : uint8_t {
-        Nil       = 0x0,
-        Line      = 0x2,
+        Nil = 0x0,
+        Line = 0x2,
         ShortText = 0x4,
 
         // nodes that count refs are odd
-        Text      = 0x1,
-        Concat    = 0x3,
-        Choice    = 0x5,
+        Text = 0x1,
+        Concat = 0x3,
+        Choice = 0x5,
     };
 
     Tag tag() const;

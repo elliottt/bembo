@@ -166,15 +166,14 @@ Doc Doc::short_text(std::string_view text) {
 
     res.value |= static_cast<uint64_t>(size << 8);
 
-    memcpy(&res.refs, text.data(), size);
+    memcpy(res.short_text_data, text.data(), size);
 
     return res;
 }
 
 std::string_view Doc::get_short_text() const {
-    const char *ptr = reinterpret_cast<const char *>(&this->refs);
     auto size = (this->value >> 8) & 0xff;
-    return std::string_view{ptr, size};
+    return std::string_view{this->short_text_data, size};
 }
 
 Doc::Doc() : Doc(Tag::Nil) {}
