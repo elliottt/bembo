@@ -4,19 +4,41 @@
 #include <atomic>
 #include <cstdint>
 #include <numeric>
+#include <ostream>
 #include <string>
 
 namespace bembo {
 
-class Renderer {
+class Writer {
 public:
-    virtual ~Renderer() = default;
+    virtual ~Writer() = default;
 
     // Emit a newline, and indent by `indent` spaces.
     virtual void line(int indent) = 0;
 
     // Emit the string.
     virtual void write(std::string_view sv) = 0;
+};
+
+class StreamWriter final : public Writer {
+private:
+    std::ostream &out;
+
+public:
+    StreamWriter(std::ostream &out);
+
+    void line(int indent) override;
+    void write(std::string_view sv) override;
+};
+
+class StringWriter final : public Writer {
+public:
+    std::string buffer;
+
+    StringWriter();
+
+    void line(int indent) override;
+    void write(std::string_view sv) override;
 };
 
 class Doc final {
@@ -77,32 +99,56 @@ public:
     Doc(Doc &&other);
     Doc &operator=(Doc &&other);
 
+    // Construct an empty doc.
     Doc();
+
+    // Construct an empty doc.
     static Doc nil();
+
+    // A newline.
     static Doc line();
+
+    // A soft newline, following these rules: if there's enough space behave like a space, otherwise behavie like a
+    // newline.
     static Doc softline();
 
+    // A single character.
     static Doc c(char c);
+
+    // A string.
     static Doc s(std::string str);
+
+    // A string, populated from a `std::string_view`.
     static Doc sv(std::string_view str);
 
+    // Concatenate two documents together.
     Doc(Doc left, Doc right);
-    Doc append(Doc other) const;
+
+    // Concatenate this document with another.
     Doc operator+(Doc other) const;
+
+    // Append another document to this one.
+    Doc &append(Doc other);
+
+    // Append another document to this one.
     Doc &operator+=(Doc other);
 
-    // Append with a space between.
+    // Concatenate another doc with this one, with a space between.
     Doc operator<<(Doc other) const;
 
-    static Doc nest(int level, Doc other);
+    // Adjust the indentation level in `other` by `indent`.
+    static Doc nest(int indent, Doc other);
+
+    // If possible, emit all of `other` on a single line, treating newlines as spaces instead.
     static Doc group(Doc other);
 
+    // True if this doc is empty.
     bool is_nil() const {
         return this->tag() == Tag::Nil;
     }
 
     // Render the document out assuming a line length of `cols`.
-    void render(Renderer &target, int cols) const;
+    void render(Writer &target, int cols) const;
 
     // Render to a string.
     std::string pretty(int cols) const;

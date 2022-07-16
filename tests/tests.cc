@@ -1,5 +1,6 @@
 #include "doctest/doctest.h"
 #include <array>
+#include <sstream>
 #include <string>
 
 #include "bembo/doc.h"
@@ -63,6 +64,38 @@ TEST_CASE("softline") {
     check_pretty("a\nb\nc", bembo::sep(Doc::softline(), docs), 1);
     check_pretty("a\nb\nc", bembo::sep(Doc::softline(), docs), 2);
     check_pretty("a b\nc", bembo::sep(Doc::softline(), docs), 3);
+}
+
+TEST_CASE("stream output") {
+    std::array<Doc, 3> docs{Doc::sv("a"), Doc::sv("b"), Doc::sv("c")};
+
+    {
+        std::stringstream out;
+        StreamWriter res{out};
+        bembo::join(docs).render(res, 80);
+        CHECK_EQ("abc", out.str());
+    }
+
+    {
+        std::stringstream out;
+        StreamWriter res{out};
+        bembo::sep(Doc::sv(", "), docs).render(res, 80);
+        CHECK_EQ("a, b, c", out.str());
+    }
+
+    {
+        std::stringstream out;
+        StreamWriter res{out};
+        bembo::sep(Doc::c(',') + Doc::softline(), docs).render(res, 3);
+        CHECK_EQ("a,\nb,\nc", out.str());
+    }
+
+    {
+        std::stringstream out;
+        StreamWriter res{out};
+        bembo::sep(Doc::c(',') + Doc::softline(), docs).render(res, 5);
+        CHECK_EQ("a, b,\nc", out.str());
+    }
 }
 
 } // namespace bembo

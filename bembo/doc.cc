@@ -207,48 +207,55 @@ Doc Doc::c(char c) {
 }
 
 Doc Doc::s(std::string str) {
+    if (str.empty()) {
+        return Doc::nil();
+    }
+
+    if (str.size() <= 8) {
+        return Doc::short_text(str);
+    }
+
     return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::move(str)}};
 }
 
 Doc Doc::sv(std::string_view str) {
+    if (str.empty()) {
+        return Doc::nil();
+    }
+
     if (str.size() <= 8) {
         return Doc::short_text(str);
-    } else {
-        return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::string(str)}};
     }
+
+    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::string(str)}};
 }
 
 Doc::Doc(Doc left, Doc right)
     : Doc{new std::atomic<int>(0), Tag::Concat, new Concat{std::move(left), std::move(right)}} {}
 
-Doc Doc::append(Doc other) const {
-    if (this->is_nil()) {
-        return other;
-    }
-
-    if (other.is_nil()) {
-        return *this;
-    }
-
+Doc Doc::operator+(Doc other) const {
     return Doc{*this, std::move(other)};
 }
 
-Doc Doc::operator+(Doc other) const {
-    return this->append(other);
-}
+Doc &Doc::append(Doc other) {
+    if (this->is_nil()) {
+        *this = std::move(other);
+    } else if (!other.is_nil()) {
+        *this = *this + std::move(other);
+    }
 
-Doc &Doc::operator+=(Doc other) {
-    *this = Doc{std::move(*this), std::move(other)};
     return *this;
 }
 
+Doc &Doc::operator+=(Doc other) {
+    return this->append(std::move(other));
+}
+
 Doc Doc::operator<<(Doc other) const {
-    return this->append(Doc::c(' ') + other);
+    return *this + Doc::c(' ') + std::move(other);
 }
 
 Doc Doc::group(Doc doc) {
-    // This looks odd but the behavior of choice is to always flatten the left branch. The result is equivalent to:
-    // > flatten doc | doc
     return Doc::choice(true, doc, doc);
 }
 
@@ -372,11 +379,11 @@ public:
 class DocRenderer final {
 public:
     const int width;
-    Renderer &out;
+    Writer &out;
 
     int col = 0;
 
-    DocRenderer(const int width, Renderer &out) : width{width}, out{out} {}
+    DocRenderer(const int width, Writer &out) : width{width}, out{out} {}
 
     std::vector<Node> work{};
 
@@ -452,31 +459,38 @@ void DocRenderer::render(const Doc *doc) {
     }
 }
 
-namespace {
+StreamWriter::StreamWriter(std::ostream &out) : out{out} {}
 
-// A simple renderer for collecting the output in a buffer.
-struct StringRenderer final : public Renderer {
-    std::string buffer;
+void StreamWriter::line(int indent) {
+    this->out << std::endl;
 
-    void line(int indent) override {
-        this->buffer.push_back('\n');
-        this->buffer.append(indent, ' ');
+    for (int i = 0; i < indent; i++) {
+        this->out.put(' ');
     }
+}
 
-    void write(std::string_view sv) override {
-        this->buffer.append(sv);
-    }
-};
+void StreamWriter::write(std::string_view sv) {
+    this->out << sv;
+}
 
-} // namespace
+StringWriter::StringWriter() : buffer{} {}
 
-void Doc::render(Renderer &out, int cols) const {
+void StringWriter::line(int indent) {
+    this->buffer.push_back('\n');
+    this->buffer.append(indent, ' ');
+}
+
+void StringWriter::write(std::string_view sv) {
+    this->buffer.append(sv);
+}
+
+void Doc::render(Writer &out, int cols) const {
     DocRenderer r{cols, out};
     r.render(this);
 }
 
 std::string Doc::pretty(int cols) const {
-    StringRenderer out;
+    StringWriter out;
     this->render(out, cols);
     return out.buffer;
 }
