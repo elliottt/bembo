@@ -168,7 +168,7 @@ Doc::Doc(std::atomic<int> *refs, Tag tag, void *ptr) : refs{refs}, value{make_ta
 }
 
 Doc Doc::choice(bool flattening, Doc left, Doc right) {
-    return Doc(new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right), flattening});
+    return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right), flattening}};
 }
 
 // Construct a short text node. This assumes that the string is 8 chars or less.
@@ -189,14 +189,14 @@ std::string_view Doc::get_short_text() const {
     return std::string_view{this->short_text_data.data(), size};
 }
 
-Doc::Doc() : Doc(Tag::Nil) {}
+Doc::Doc() : Doc{Tag::Nil} {}
 
 Doc Doc::nil() {
-    return Doc();
+    return Doc{};
 }
 
 Doc Doc::line() {
-    return Doc(Tag::Line);
+    return Doc{Tag::Line};
 }
 
 Doc Doc::softline() {
@@ -220,7 +220,7 @@ Doc Doc::s(std::string str) {
         return Doc::short_text(str);
     }
 
-    return Doc(new std::atomic<int>(0), Tag::Text, new Text{std::move(str)});
+    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::move(str)}};
 }
 
 Doc Doc::sv(std::string_view str) {
@@ -232,13 +232,11 @@ Doc Doc::sv(std::string_view str) {
         return Doc::short_text(str);
     }
 
-    return Doc(new std::atomic<int>(0), Tag::Text, new Text{str});
+    return Doc{new std::atomic<int>(0), Tag::Text, new Text{str}};
 }
 
-Doc::Doc(std::initializer_list<Doc> docs) : Doc(new std::atomic<int>(0), Tag::Concat, new Concat(docs)) {}
-
 Doc Doc::operator+(Doc other) const {
-    return Doc{*this, std::move(other)};
+    return Doc::concat(*this, std::move(other));
 }
 
 Doc &Doc::append(Doc other) {
@@ -259,7 +257,7 @@ Doc &Doc::append(Doc other) {
 
         [[fallthrough]];
     default:
-        *this = Doc{*this, std::move(other)};
+        *this = Doc::concat(*this, std::move(other));
         break;
     }
 
@@ -279,7 +277,7 @@ Doc Doc::group(Doc doc) {
 }
 
 Doc Doc::nest(int indent, Doc doc) {
-    return Doc(new std::atomic<int>(0), Tag::Nest, new Nest{std::move(doc), indent});
+    return Doc{new std::atomic<int>(0), Tag::Nest, new Nest{std::move(doc), indent}};
 }
 
 namespace {
@@ -518,19 +516,19 @@ std::string Doc::pretty(int cols) const {
 }
 
 Doc angles(Doc doc) {
-    return Doc::c('<') + doc + Doc::c('>');
+    return Doc::concat(Doc::c('<'), std::move(doc), Doc::c('>'));
 }
 
 Doc braces(Doc doc) {
-    return Doc::c('{') + doc + Doc::c('}');
+    return Doc::concat(Doc::c('{'), std::move(doc), Doc::c('}'));
 }
 
 Doc quotes(Doc doc) {
-    return Doc::c('\'') + doc + Doc::c('\'');
+    return Doc::concat(Doc::c('\''), std::move(doc), Doc::c('\''));
 }
 
 Doc dquotes(Doc doc) {
-    return Doc::c('"') + doc + Doc::c('"');
+    return Doc::concat(Doc::c('"'), std::move(doc), Doc::c('"'));
 }
 
 } // namespace bembo

@@ -117,10 +117,7 @@ TEST_CASE("xml") {
 }
 
 TEST_CASE("concat") {
-    auto a = Doc::sv("a");
-    auto concat = Doc{a, a, a, a};
-
-    check_pretty("aaaa", concat);
+    check_pretty("ab", Doc::concat(Doc::sv("a"), Doc::sv("b")));
 }
 
 } // namespace bembo

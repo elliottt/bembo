@@ -7,6 +7,7 @@
 #include <numeric>
 #include <ostream>
 #include <string>
+#include <vector>
 
 namespace bembo {
 
@@ -126,9 +127,6 @@ public:
     // A string, populated from a `std::string_view`.
     static Doc sv(std::string_view str);
 
-    // Concatenate documents together.
-    Doc(std::initializer_list<Doc> init);
-
     // Concatenate this document with another.
     Doc operator+(Doc other) const;
 
@@ -157,6 +155,25 @@ public:
 
     // Render to a string.
     std::string pretty(int cols) const;
+
+private:
+    template <typename T, typename... Docs>
+    static void concat_impl(Doc &acc, T &&arg, Docs &&... rest) {
+        acc.append(std::move(arg));
+        if constexpr (sizeof...(Docs) > 0) {
+            concat_impl(acc, std::forward<Docs>(rest)...);
+        }
+    }
+
+public:
+    template <typename... Docs>
+    static Doc concat(Docs&&... rest) {
+        Doc acc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
+        acc.cast<std::vector<Doc>>().reserve(sizeof...(Docs));
+        concat_impl(acc, std::forward<Docs>(rest)...);
+        return acc;
+    }
+
 };
 
 Doc angles(Doc doc);
