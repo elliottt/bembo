@@ -2,7 +2,7 @@
 cc_library(
     name = "bembo",
     srcs = ["doc.cc"],
-    hdrs = ["doc.h", "ranges.h"],
+    hdrs = ["doc.h"],
     copts = [
         "-std=c++20",
         "-fno-rtti",

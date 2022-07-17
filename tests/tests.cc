@@ -4,7 +4,6 @@
 #include <string>
 
 #include "bembo/doc.h"
-#include "bembo/ranges.h"
 
 using namespace std::literals::string_literals;
 using namespace std::literals::string_view_literals;
@@ -121,10 +120,18 @@ TEST_CASE("concat") {
 }
 
 TEST_CASE("append") {
-    Doc res = Doc::nil();
     std::array<Doc, 3> docs{Doc::sv("a"), Doc::sv("b"), Doc::sv("c")};
-    res.append(docs.begin(), docs.end());
-    check_pretty("abc", res);
+    {
+        Doc res = Doc::nil();
+        res.append(docs.begin(), docs.end());
+        check_pretty("abc", res);
+    }
+
+    {
+        Doc res = Doc::nil();
+        res.append(docs);
+        check_pretty("abc", res);
+    }
 }
 
 } // namespace bembo

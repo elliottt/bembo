@@ -135,10 +135,27 @@ public:
 
     // Append the contents of the range to this Doc by copying its elements.
     template <typename InputIt, typename Sentinel>
-    Doc &append(InputIt begin, Sentinel end) {
+    Doc &append(InputIt &&begin, Sentinel &&end) {
         if (this->tag() != Tag::Concat) {
             *this = Doc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
         }
+
+        auto &vec = this->cast<std::vector<Doc>>();
+        vec.reserve(vec.size() + std::distance(begin, end));
+        std::copy(begin, end, std::back_inserter(vec));
+
+        return *this;
+    }
+
+    // Append the contents of the range to this Doc by copying its elements.
+    template <typename Rng>
+    Doc &append(Rng &&rng) {
+        if (this->tag() != Tag::Concat) {
+            *this = Doc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
+        }
+
+        auto begin = rng.begin();
+        auto end = rng.end();
 
         auto &vec = this->cast<std::vector<Doc>>();
         vec.reserve(vec.size() + std::distance(begin, end));
@@ -199,7 +216,11 @@ template <typename It, typename Sentinel> Doc join(It &&begin, Sentinel &&end) {
     return std::accumulate(std::forward<It>(begin), std::forward<Sentinel>(end), Doc::nil());
 }
 
-template <typename It, typename Sentinel> Doc sep(Doc sep, It &&begin, Sentinel &&end) {
+template <typename Range> Doc join(Range &&rng) {
+    return std::accumulate(rng.begin(), rng.end(), Doc::nil());
+}
+
+template <typename It, typename Sentinel> Doc sep(Doc d, It &&begin, Sentinel &&end) {
     Doc res;
 
     if (begin == end) {
@@ -215,10 +236,14 @@ template <typename It, typename Sentinel> Doc sep(Doc sep, It &&begin, Sentinel 
             break;
         }
 
-        res += Doc::group(chunk + sep);
+        res += Doc::group(chunk + d);
     }
 
     return res;
+}
+
+template <typename Range> Doc sep(Doc d, Range &&rng) {
+    return sep(std::move(d), rng.begin(), rng.end());
 }
 
 } // namespace bembo
