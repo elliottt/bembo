@@ -133,6 +133,20 @@ public:
     // Append another document to this one.
     Doc &append(Doc other);
 
+    // Append the contents of the range to this Doc by copying its elements.
+    template <typename InputIt, typename Sentinel>
+    Doc &append(InputIt begin, Sentinel end) {
+        if (this->tag() != Tag::Concat) {
+            *this = Doc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
+        }
+
+        auto &vec = this->cast<std::vector<Doc>>();
+        vec.reserve(vec.size() + std::distance(begin, end));
+        std::copy(begin, end, std::back_inserter(vec));
+
+        return *this;
+    }
+
     // Append another document to this one.
     Doc &operator+=(Doc other);
 

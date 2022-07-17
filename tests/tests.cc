@@ -120,4 +120,11 @@ TEST_CASE("concat") {
     check_pretty("ab", Doc::concat(Doc::sv("a"), Doc::sv("b")));
 }
 
+TEST_CASE("append") {
+    Doc res = Doc::nil();
+    std::array<Doc, 3> docs{Doc::sv("a"), Doc::sv("b"), Doc::sv("c")};
+    res.append(docs.begin(), docs.end());
+    check_pretty("abc", res);
+}
+
 } // namespace bembo
