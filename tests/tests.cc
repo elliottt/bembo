@@ -98,4 +98,22 @@ TEST_CASE("stream output") {
     }
 }
 
+Doc tag(std::string_view name, Doc body = Doc::nil()) {
+    if (body.is_nil()) {
+        return angles(Doc::sv(name) << Doc::c('/'));
+    } else {
+        auto tag = Doc::sv(name);
+        return Doc::group(
+            angles(tag) + Doc::nest(2, Doc::softbreak() + body) + Doc::softbreak() + angles(Doc::c('/') + tag));
+    }
+}
+
+TEST_CASE("xml") {
+    check_pretty("<br />", tag("br"));
+
+    auto ab = tag("a", tag("b"));
+    check_pretty("<a><b /></a>", ab);
+    check_pretty("<a>\n  <b />\n</a>", ab, 6);
+}
+
 } // namespace bembo

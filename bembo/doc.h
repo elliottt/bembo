@@ -108,9 +108,12 @@ public:
     // A newline.
     static Doc line();
 
-    // A soft newline, following these rules: if there's enough space behave like a space, otherwise behavie like a
+    // A soft newline, following these rules: if there's enough space behave like a space, otherwise behave like a
     // newline.
     static Doc softline();
+
+    // A soft break, following these rules: if there's enough space behave like nil, otherwise behave like a newline.
+    static Doc softbreak();
 
     // A single character.
     static Doc c(char c);
@@ -153,6 +156,11 @@ public:
     // Render to a string.
     std::string pretty(int cols) const;
 };
+
+Doc angles(Doc doc);
+Doc braces(Doc doc);
+Doc quotes(Doc doc);
+Doc dquotes(Doc doc);
 
 template <typename It, typename Sentinel> Doc join(It &&begin, Sentinel &&end) {
     return std::accumulate(std::forward<It>(begin), std::forward<Sentinel>(end), Doc::nil());

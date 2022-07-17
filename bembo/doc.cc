@@ -202,6 +202,10 @@ Doc Doc::softline() {
     return Doc::choice(false, Doc::c(' '), Doc::line());
 }
 
+Doc Doc::softbreak() {
+    return Doc::choice(false, Doc::nil(), Doc::line());
+}
+
 Doc Doc::c(char c) {
     return Doc::short_text(std::string_view{&c, 1});
 }
@@ -493,6 +497,22 @@ std::string Doc::pretty(int cols) const {
     StringWriter out;
     this->render(out, cols);
     return out.buffer;
+}
+
+Doc angles(Doc doc) {
+    return Doc::c('<') + doc + Doc::c('>');
+}
+
+Doc braces(Doc doc) {
+    return Doc::c('{') + doc + Doc::c('}');
+}
+
+Doc quotes(Doc doc) {
+    return Doc::c('\'') + doc + Doc::c('\'');
+}
+
+Doc dquotes(Doc doc) {
+    return Doc::c('"') + doc + Doc::c('"');
 }
 
 } // namespace bembo
