@@ -1,5 +1,6 @@
+#include <algorithm>
+#include <cassert>
 #include <cstdint>
-#include <cstring>
 #include <vector>
 
 #include "doc.h"
@@ -17,14 +18,8 @@ uint64_t make_tagged(uint16_t tag, void *ptr) {
     return (reinterpret_cast<uint64_t>(ptr) << TAG_MASK_BITS) | static_cast<uint64_t>(tag);
 }
 
-struct Text final {
-    std::string text;
-};
-
-struct Concat final {
-    Doc left;
-    Doc right;
-};
+using Concat = std::vector<Doc>;
+using Text = std::string;
 
 // NOTE: the left side is always flattened implicitly, so lines will be interpreted as a single space.
 struct Choice final {
@@ -61,13 +56,19 @@ bool Doc::boxed() const {
 }
 
 void Doc::increment() {
-    if (this->boxed()) {
-        this->refs->fetch_add(1);
-    }
+    assert(this->boxed());
+    this->refs->fetch_add(1);
 }
 
 bool Doc::decrement() {
-    return this->refs->fetch_sub(1) <= 1;
+    assert(this->boxed());
+    auto count = this->refs->fetch_sub(1);
+    return count == 1;
+}
+
+bool Doc::is_unique() const {
+    assert(this->boxed());
+    return this->refs->load() == 1;
 }
 
 void Doc::cleanup() {
@@ -167,35 +168,35 @@ Doc::Doc(std::atomic<int> *refs, Tag tag, void *ptr) : refs{refs}, value{make_ta
 }
 
 Doc Doc::choice(bool flattening, Doc left, Doc right) {
-    return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right), flattening}};
+    return Doc(new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right), flattening});
 }
 
 // Construct a short text node. This assumes that the string is 8 chars or less.
 Doc Doc::short_text(std::string_view text) {
-    Doc res{Tag::ShortText};
+    Doc res(Tag::ShortText);
 
-    auto size = std::min(text.size(), 8ul);
+    auto size = text.size();
+    assert(text.size() <= 8);
 
     res.value |= static_cast<uint64_t>(size << 8);
-
-    memcpy(res.short_text_data, text.data(), size);
+    std::copy_n(text.begin(), size, res.short_text_data.begin());
 
     return res;
 }
 
 std::string_view Doc::get_short_text() const {
     auto size = (this->value >> 8) & 0xff;
-    return std::string_view{this->short_text_data, size};
+    return std::string_view{this->short_text_data.data(), size};
 }
 
 Doc::Doc() : Doc(Tag::Nil) {}
 
 Doc Doc::nil() {
-    return Doc{};
+    return Doc();
 }
 
 Doc Doc::line() {
-    return Doc{Tag::Line};
+    return Doc(Tag::Line);
 }
 
 Doc Doc::softline() {
@@ -219,7 +220,7 @@ Doc Doc::s(std::string str) {
         return Doc::short_text(str);
     }
 
-    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::move(str)}};
+    return Doc(new std::atomic<int>(0), Tag::Text, new Text{std::move(str)});
 }
 
 Doc Doc::sv(std::string_view str) {
@@ -231,21 +232,35 @@ Doc Doc::sv(std::string_view str) {
         return Doc::short_text(str);
     }
 
-    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::string(str)}};
+    return Doc(new std::atomic<int>(0), Tag::Text, new Text{str});
 }
 
-Doc::Doc(Doc left, Doc right)
-    : Doc{new std::atomic<int>(0), Tag::Concat, new Concat{std::move(left), std::move(right)}} {}
+Doc::Doc(std::initializer_list<Doc> docs) : Doc(new std::atomic<int>(0), Tag::Concat, new Concat(docs)) {}
 
 Doc Doc::operator+(Doc other) const {
     return Doc{*this, std::move(other)};
 }
 
 Doc &Doc::append(Doc other) {
-    if (this->is_nil()) {
+    if (other.is_nil()) {
+        return *this;
+    }
+
+    switch (this->tag()) {
+    case Tag::Nil:
         *this = std::move(other);
-    } else if (!other.is_nil()) {
-        *this = *this + std::move(other);
+        break;
+
+    case Tag::Concat:
+        if (this->is_unique()) {
+            this->cast<Concat>().emplace_back(std::move(other));
+            break;
+        }
+
+        [[fallthrough]];
+    default:
+        *this = Doc{*this, std::move(other)};
+        break;
     }
 
     return *this;
@@ -264,7 +279,7 @@ Doc Doc::group(Doc doc) {
 }
 
 Doc Doc::nest(int indent, Doc doc) {
-    return Doc{new std::atomic<int>(0), Tag::Nest, new Nest{std::move(doc), indent}};
+    return Doc(new std::atomic<int>(0), Tag::Nest, new Nest{std::move(doc), indent});
 }
 
 namespace {
@@ -276,6 +291,7 @@ struct Node {
 
     Node(const Doc *doc, int indent, bool flattening) : doc{doc}, indent{indent}, flattening{flattening} {}
 };
+
 } // namespace
 
 class Fits final {
@@ -338,7 +354,7 @@ public:
                 }
 
                 case Doc::Tag::Text: {
-                    auto &text = node.doc->cast<Text>().text;
+                    auto &text = node.doc->cast<Text>();
                     this->col += text.size();
 
                     if (this->col > this->width) {
@@ -350,8 +366,9 @@ public:
 
                 case Doc::Tag::Concat: {
                     auto &cat = node.doc->cast<Concat>();
-                    this->work.emplace_back(&cat.right, 0, node.flattening);
-                    this->work.emplace_back(&cat.left, 0, node.flattening);
+                    for (auto it = cat.rbegin(); it != cat.rend(); ++it) {
+                        this->work.emplace_back(&*it, 0, node.flattening);
+                    }
                     break;
                 }
 
@@ -426,7 +443,7 @@ void DocRenderer::render(const Doc *doc) {
         }
 
         case Doc::Tag::Text: {
-            auto &text = node.doc->cast<Text>().text;
+            auto &text = node.doc->cast<Text>();
             this->col += text.size();
             this->out.write(text);
             break;
@@ -434,8 +451,9 @@ void DocRenderer::render(const Doc *doc) {
 
         case Doc::Tag::Concat: {
             auto &cat = node.doc->cast<Concat>();
-            this->work.emplace_back(&cat.right, node.indent, node.flattening);
-            this->work.emplace_back(&cat.left, node.indent, node.flattening);
+            for (auto it = cat.rbegin(); it != cat.rend(); ++it) {
+                this->work.emplace_back(&*it, node.indent, node.flattening);
+            }
             break;
         }
 

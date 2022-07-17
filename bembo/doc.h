@@ -1,6 +1,7 @@
 #ifndef BEMBO_DOC_H
 #define BEMBO_DOC_H
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <numeric>
@@ -48,7 +49,7 @@ private:
 
     // Shared refcount for when the tag of `data` doesn't indicate an inlined case.
     union {
-        char short_text_data[8];
+        std::array<char, 8> short_text_data;
         std::atomic<int> *refs;
     };
 
@@ -80,6 +81,7 @@ private:
     bool boxed() const;
     void increment();
     bool decrement();
+    bool is_unique() const;
     void cleanup();
 
     Doc(Tag tag);
@@ -124,8 +126,8 @@ public:
     // A string, populated from a `std::string_view`.
     static Doc sv(std::string_view str);
 
-    // Concatenate two documents together.
-    Doc(Doc left, Doc right);
+    // Concatenate documents together.
+    Doc(std::initializer_list<Doc> init);
 
     // Concatenate this document with another.
     Doc operator+(Doc other) const;

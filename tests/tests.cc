@@ -29,7 +29,7 @@ TEST_CASE("basic") {
 
 TEST_CASE("line") {
     auto x = Doc::sv("x");
-    check_pretty("x\nx", (x + Doc::line()) + x);
+    check_pretty("x\nx", x + Doc::line() + x);
 }
 
 TEST_CASE("join") {
@@ -114,6 +114,13 @@ TEST_CASE("xml") {
     auto ab = tag("a", tag("b"));
     check_pretty("<a><b /></a>", ab);
     check_pretty("<a>\n  <b />\n</a>", ab, 6);
+}
+
+TEST_CASE("concat") {
+    auto a = Doc::sv("a");
+    auto concat = Doc{a, a, a, a};
+
+    check_pretty("aaaa", concat);
 }
 
 } // namespace bembo
