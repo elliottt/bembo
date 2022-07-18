@@ -55,7 +55,7 @@ private:
     };
 
     // Optional pointer + tag in the following format:
-    // 63                                    0
+    // 63                                                            0
     // +--------------------+------------------------+---------------+
     // | 48 bits of pointer | 8 bits of short length | 8 bits of tag |
     // +--------------------+------------------------+---------------+
