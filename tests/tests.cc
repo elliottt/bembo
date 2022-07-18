@@ -137,4 +137,11 @@ TEST_CASE("append") {
     }
 }
 
+TEST_CASE("flatten") {
+    auto d = Doc::concat(Doc::sv("a"), Doc::line(), Doc::sv("b"), Doc::line(), Doc::sv("c"));
+
+    check_pretty("a\nb\nc", d);
+    check_pretty("a b c", Doc::flatten(d));
+}
+
 } // namespace bembo

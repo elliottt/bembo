@@ -54,11 +54,6 @@ private:
         std::atomic<int> *refs;
     };
 
-    // Optional pointer + tag in the following format:
-    // 63                                                            0
-    // +--------------------+------------------------+---------------+
-    // | 48 bits of pointer | 8 bits of short length | 8 bits of tag |
-    // +--------------------+------------------------+---------------+
     uint64_t value;
 
     enum class Tag : uint8_t {
@@ -85,9 +80,11 @@ private:
     bool is_unique() const;
     void cleanup();
 
+    bool is_flattened() const;
+
     Doc(Tag tag);
     Doc(std::atomic<int> *refs, Tag tag, void *ptr);
-    static Doc choice(bool flattening, Doc left, Doc right);
+    static Doc choice(Doc left, Doc right);
 
     static Doc short_text(std::string_view text);
 
@@ -175,6 +172,9 @@ public:
 
     // If possible, emit all of `other` on a single line, treating newlines as spaces instead.
     static Doc group(Doc other);
+
+    Doc &flatten();
+    static Doc flatten(Doc other);
 
     // True if this doc is empty.
     bool is_nil() const {

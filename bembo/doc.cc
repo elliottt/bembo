@@ -11,11 +11,37 @@ namespace bembo {
 
 namespace {
 
-constexpr int TAG_MASK_BITS = 16;
+
+constexpr uint64_t TAG_MASK_BITS = 8;
 constexpr uint64_t TAG_MASK = (1 << TAG_MASK_BITS) - 1;
 
+constexpr uint64_t SIZE_MASK_BITS = 7;
+constexpr uint64_t SIZE_MASK = ((1 << SIZE_MASK_BITS) - 1) << TAG_MASK_BITS;
+
+constexpr uint64_t FLATTENED_MASK_BITS = 1;
+constexpr uint64_t FLATTENED_MASK = ((1 << FLATTENED_MASK_BITS) - 1) << (TAG_MASK_BITS + SIZE_MASK_BITS);
+
+constexpr int METADATA_BITS = TAG_MASK_BITS + SIZE_MASK_BITS + FLATTENED_MASK_BITS;
+
+// The format of the Doc field is as follows:
+//
+// 0        8         16                                                    64
+// +------------------------------------------------------------------------+
+// |                 shared refcount, or inlined string data                |
+// +--------+-------+-+-----------------------------------------------------+
+// |  tag   |  size |f|         48 bits of pointer to heap object           |
+// +--------+-------+-+-----------------------------------------------------+
+//
+// tag:       The `Tag` value for this doc, with odd tags indicating that the object is heap allocated.
+// size:      The size of the inlined string case, invalid for all other tags.
+// f:         Whether or not this doc has had `flatten` applied to it.
+// pointer:   A pointer to the heap object whose shape is determined by `tag`.
+//
+// refcount/string data: either a pointer to an atomic refcount shared by heap allocated objects, or up to eight bytes
+// of inlined string data.
+
 uint64_t make_tagged(uint16_t tag, void *ptr) {
-    return (reinterpret_cast<uint64_t>(ptr) << TAG_MASK_BITS) | static_cast<uint64_t>(tag);
+    return (reinterpret_cast<uint64_t>(ptr) << METADATA_BITS) | static_cast<uint64_t>(tag);
 }
 
 using Concat = std::vector<Doc>;
@@ -25,7 +51,6 @@ using Text = std::string;
 struct Choice final {
     Doc left;
     Doc right;
-    bool flattening;
 };
 
 struct Nest final {
@@ -40,7 +65,7 @@ Doc::Tag Doc::tag() const {
 }
 
 void *Doc::data() const {
-    return reinterpret_cast<void *>(this->value >> TAG_MASK_BITS);
+    return reinterpret_cast<void *>(this->value >> METADATA_BITS);
 }
 
 template <typename T> T &Doc::cast() {
@@ -69,6 +94,10 @@ bool Doc::decrement() {
 bool Doc::is_unique() const {
     assert(this->boxed());
     return this->refs->load() == 1;
+}
+
+bool Doc::is_flattened() const {
+    return (this->value & FLATTENED_MASK) != 0;
 }
 
 void Doc::cleanup() {
@@ -167,8 +196,8 @@ Doc::Doc(std::atomic<int> *refs, Tag tag, void *ptr) : refs{refs}, value{make_ta
     this->increment();
 }
 
-Doc Doc::choice(bool flattening, Doc left, Doc right) {
-    return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right), flattening}};
+Doc Doc::choice(Doc left, Doc right) {
+    return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right)}};
 }
 
 // Construct a short text node. This assumes that the string is 8 chars or less.
@@ -178,14 +207,14 @@ Doc Doc::short_text(std::string_view text) {
     auto size = text.size();
     assert(text.size() <= 8);
 
-    res.value |= static_cast<uint64_t>(size << 8);
+    res.value |= static_cast<uint64_t>(size << TAG_MASK_BITS) & SIZE_MASK;
     std::copy_n(text.begin(), size, res.short_text_data.begin());
 
     return res;
 }
 
 std::string_view Doc::get_short_text() const {
-    auto size = (this->value >> 8) & 0xff;
+    auto size = (this->value & SIZE_MASK) >> TAG_MASK_BITS;
     return std::string_view{this->short_text_data.data(), size};
 }
 
@@ -200,11 +229,11 @@ Doc Doc::line() {
 }
 
 Doc Doc::softline() {
-    return Doc::choice(false, Doc::c(' '), Doc::line());
+    return Doc::choice(Doc::c(' '), Doc::line());
 }
 
 Doc Doc::softbreak() {
-    return Doc::choice(false, Doc::nil(), Doc::line());
+    return Doc::choice(Doc::nil(), Doc::line());
 }
 
 Doc Doc::c(char c) {
@@ -273,7 +302,19 @@ Doc Doc::operator<<(Doc other) const {
 }
 
 Doc Doc::group(Doc doc) {
-    return Doc::choice(true, doc, doc);
+    auto flattened = Doc::flatten(doc);
+    return Doc::choice(std::move(flattened), std::move(doc));
+}
+
+Doc &Doc::flatten() {
+    this->value |= FLATTENED_MASK;
+    return *this;
+}
+
+Doc Doc::flatten(Doc doc) {
+    Doc copy = doc;
+    copy.flatten();
+    return copy;
 }
 
 Doc Doc::nest(int indent, Doc doc) {
@@ -321,7 +362,11 @@ public:
     // Check to see if a Doc will fit in he space remaining on a line.
     // NOTE: this check completely ignores indentation, as newlines terminate the check.
     bool check(const Doc *doc, bool flattening) {
-        this->work.emplace_back(doc, 0, flattening);
+        this->work.emplace_back(doc, 0, flattening || doc->is_flattened());
+
+        auto push = [this](Node &parent, const Doc *doc) {
+            this->work.emplace_back(doc, 0, parent.flattening || doc->is_flattened());
+        };
 
         do {
             while (!this->work.empty()) {
@@ -365,7 +410,7 @@ public:
                 case Doc::Tag::Concat: {
                     auto &cat = node.doc->cast<Concat>();
                     for (auto it = cat.rbegin(); it != cat.rend(); ++it) {
-                        this->work.emplace_back(&*it, 0, node.flattening);
+                        push(node, &*it);
                     }
                     break;
                 }
@@ -374,17 +419,17 @@ public:
                     auto &choice = node.doc->cast<Choice>();
                     // TODO: figure out how to avoid allocating a whole extra `Fits` here
                     Fits nested{*this};
-                    if (nested.check(&choice.left, choice.flattening)) {
-                        this->work.emplace_back(&choice.left, 0, true);
+                    if (nested.check(&choice.left, node.flattening || choice.left.is_flattened())) {
+                        push(node, &choice.left);
                     } else {
-                        this->work.emplace_back(&choice.right, 0, node.flattening);
+                        push(node, &choice.right);
                     }
                     break;
                 }
 
                 case Doc::Tag::Nest: {
                     auto &nest = node.doc->cast<Nest>();
-                    this->work.emplace_back(&nest.doc, 0, node.flattening);
+                    push(node, &nest.doc);
                     break;
                 }
                 }
@@ -411,7 +456,11 @@ public:
 
 void DocRenderer::render(const Doc *doc) {
     this->work.clear();
-    this->work.emplace_back(doc, 0, false);
+    this->work.emplace_back(doc, 0, doc->is_flattened());
+
+    auto push = [this](Node &parent, const Doc *doc) -> Node& {
+        return this->work.emplace_back(doc, parent.indent, parent.flattening || doc->is_flattened());
+    };
 
     while (!this->work.empty()) {
         auto node = this->work.back();
@@ -450,7 +499,7 @@ void DocRenderer::render(const Doc *doc) {
         case Doc::Tag::Concat: {
             auto &cat = node.doc->cast<Concat>();
             for (auto it = cat.rbegin(); it != cat.rend(); ++it) {
-                this->work.emplace_back(&*it, node.indent, node.flattening);
+                push(node, &*it);
             }
             break;
         }
@@ -461,10 +510,10 @@ void DocRenderer::render(const Doc *doc) {
                 this->work.emplace_back(&choice.left, node.indent, true);
             } else {
                 Fits fit{this->width, this->col, this->work.rbegin(), this->work.rend()};
-                if (fit.check(&choice.left, choice.flattening)) {
-                    this->work.emplace_back(&choice.left, node.indent, choice.flattening);
+                if (fit.check(&choice.left, node.flattening)) {
+                    push(node, &choice.left);
                 } else {
-                    this->work.emplace_back(&choice.right, node.indent, false);
+                    push(node, &choice.right);
                 }
             }
             break;
@@ -472,7 +521,8 @@ void DocRenderer::render(const Doc *doc) {
 
         case Doc::Tag::Nest: {
             auto &nest = node.doc->cast<Nest>();
-            this->work.emplace_back(&nest.doc, node.indent + nest.indent, node.flattening);
+            auto &next = push(node, &nest.doc);
+            next.indent += nest.indent;
             break;
         }
         }
