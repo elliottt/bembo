@@ -1,0 +1,42 @@
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+
+jobs:
+
+  tests:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Bembo
+        uses: actions/checkout@v3.0.2
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1.4.1
+        with:
+          version: 12.0.0
+
+      - name: Add clang to the PATH
+        run: |
+          echo "${{ env.LLVM_PATH }}/bin" >> $GITHUB_PATH
+
+      - name: Setup bazelisk
+        uses: bazelbuild/setup-bazelisk@v1
+
+      - name: Mount bazel cache
+        uses: actions/cache@v2.1.6
+        with:
+          path: "/home/runner/.cache/bazel"
+          key: bazel
+
+      # Runs a single command using the runners shell
+      - name: Run tests
+        run: |
+          bazelisk test --build_tests_only //...
