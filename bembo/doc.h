@@ -102,6 +102,12 @@ public:
     // Construct an empty doc.
     Doc();
 
+    // Construct a Doc from a string constant.
+    Doc(const char *str);
+
+    // Construct a Doc from a string constant.
+    Doc(std::string_view str);
+
     // Construct an empty doc.
     static Doc nil();
 
@@ -120,6 +126,9 @@ public:
 
     // A string.
     static Doc s(std::string str);
+
+    // A string.
+    static Doc s(const char *str);
 
     // A string, populated from a `std::string_view`.
     static Doc sv(std::string_view str);
@@ -167,6 +176,15 @@ public:
     // Concatenate another doc with this one, with a space between.
     Doc operator<<(Doc other) const;
 
+    // Append another document to this one with a space between.
+    Doc &operator<<=(Doc other);
+
+    // Concatenate two Docs with a line between them.
+    Doc operator/(Doc other) const;
+
+    // Append a Doc after a newline.
+    Doc &operator/=(Doc other);
+
     // Adjust the indentation level in `other` by `indent`.
     static Doc nest(int indent, Doc other);
 
@@ -205,12 +223,13 @@ public:
         return acc;
     }
 
+    static Doc angles(Doc doc);
+    static Doc braces(Doc doc);
+    static Doc brackets(Doc doc);
+    static Doc quotes(Doc doc);
+    static Doc dquotes(Doc doc);
+    static Doc parens(Doc doc);
 };
-
-Doc angles(Doc doc);
-Doc braces(Doc doc);
-Doc quotes(Doc doc);
-Doc dquotes(Doc doc);
 
 template <typename It, typename Sentinel> Doc join(It &&begin, Sentinel &&end) {
     return std::accumulate(std::forward<It>(begin), std::forward<Sentinel>(end), Doc::nil());

@@ -99,13 +99,13 @@ TEST_CASE("stream output") {
 
 Doc tag(std::string_view name, Doc body = Doc::nil()) {
     if (body.is_nil()) {
-        return angles(Doc::sv(name) << Doc::c('/'));
+        return Doc::angles(Doc::sv(name) << Doc::c('/'));
     } else {
         auto tag = Doc::sv(name);
         return Doc::concat(
-            angles(tag),
+            Doc::angles(tag),
             Doc::group(Doc::concat(Doc::nest(2, Doc::softbreak() + body), Doc::softbreak())),
-            angles(Doc::c('/') + tag));
+            Doc::angles(Doc::c('/') + tag));
     }
 }
 
@@ -142,6 +142,11 @@ TEST_CASE("flatten") {
 
     check_pretty("a\nb\nc", d);
     check_pretty("a b c", Doc::flatten(d));
+}
+
+TEST_CASE("strings") {
+    check_pretty("hi", "hi");
+    check_pretty("hi", "hi"sv);
 }
 
 } // namespace bembo

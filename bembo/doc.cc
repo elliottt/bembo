@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "doc.h"
@@ -10,7 +11,6 @@ using namespace std::literals::string_view_literals;
 namespace bembo {
 
 namespace {
-
 
 constexpr uint64_t TAG_MASK_BITS = 8;
 constexpr uint64_t TAG_MASK = (1 << TAG_MASK_BITS) - 1;
@@ -220,6 +220,10 @@ std::string_view Doc::get_short_text() const {
 
 Doc::Doc() : Doc{Tag::Nil} {}
 
+Doc::Doc(const char *str) : Doc{Doc::s(str)} {}
+
+Doc::Doc(std::string_view str) : Doc{Doc::sv(str)} {}
+
 Doc Doc::nil() {
     return Doc{};
 }
@@ -250,6 +254,19 @@ Doc Doc::s(std::string str) {
     }
 
     return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::move(str)}};
+}
+
+Doc Doc::s(const char *str) {
+    if (str == nullptr) {
+        return Doc::nil();
+    }
+
+    auto len = strlen(str);
+    if (len <= 8) {
+        return Doc::short_text(std::string_view{str, len});
+    }
+
+    return Doc{new std::atomic<int>(0), Tag::Text, new Text{str, len}};
 }
 
 Doc Doc::sv(std::string_view str) {
@@ -299,6 +316,21 @@ Doc &Doc::operator+=(Doc other) {
 
 Doc Doc::operator<<(Doc other) const {
     return *this + Doc::c(' ') + std::move(other);
+}
+
+Doc &Doc::operator<<=(Doc other) {
+    this->append(Doc::c(' '));
+    this->append(std::move(other));
+    return *this;
+}
+
+Doc Doc::operator/(Doc other) const {
+    return Doc::concat(*this, Doc::line(), std::move(other));
+}
+
+Doc &Doc::operator/=(Doc other) {
+    *this = Doc::concat(*this, Doc::line(), std::move(other));
+    return *this;
 }
 
 Doc Doc::group(Doc doc) {
@@ -458,7 +490,7 @@ void DocRenderer::render(const Doc *doc) {
     this->work.clear();
     this->work.emplace_back(doc, 0, doc->is_flattened());
 
-    auto push = [this](Node &parent, const Doc *doc) -> Node& {
+    auto push = [this](Node &parent, const Doc *doc) -> Node & {
         return this->work.emplace_back(doc, parent.indent, parent.flattening || doc->is_flattened());
     };
 
@@ -565,20 +597,28 @@ std::string Doc::pretty(int cols) const {
     return out.buffer;
 }
 
-Doc angles(Doc doc) {
+Doc Doc::angles(Doc doc) {
     return Doc::concat(Doc::c('<'), std::move(doc), Doc::c('>'));
 }
 
-Doc braces(Doc doc) {
+Doc Doc::braces(Doc doc) {
     return Doc::concat(Doc::c('{'), std::move(doc), Doc::c('}'));
 }
 
-Doc quotes(Doc doc) {
+Doc Doc::brackets(Doc doc) {
+    return Doc::concat(Doc::c('['), std::move(doc), Doc::c(']'));
+}
+
+Doc Doc::quotes(Doc doc) {
     return Doc::concat(Doc::c('\''), std::move(doc), Doc::c('\''));
 }
 
-Doc dquotes(Doc doc) {
+Doc Doc::dquotes(Doc doc) {
     return Doc::concat(Doc::c('"'), std::move(doc), Doc::c('"'));
+}
+
+Doc Doc::parens(Doc doc) {
+    return Doc::concat(Doc::c('('), std::move(doc), Doc::c(')'));
 }
 
 } // namespace bembo
