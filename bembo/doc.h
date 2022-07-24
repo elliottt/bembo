@@ -83,12 +83,15 @@ private:
     bool is_flattened() const;
 
     Doc(Tag tag);
-    Doc(std::atomic<int> *refs, Tag tag, void *ptr);
+    Doc(Tag tag, void *ptr);
     static Doc choice(Doc left, Doc right);
 
     static Doc short_text(std::string_view text);
 
     std::string_view get_short_text() const;
+
+    bool init_short_str(std::string_view str);
+    void init_string(std::string str);
 
 public:
     ~Doc();
@@ -143,7 +146,7 @@ public:
     template <typename InputIt, typename Sentinel>
     Doc &append(InputIt &&begin, Sentinel &&end) {
         if (this->tag() != Tag::Concat) {
-            *this = Doc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
+            *this = Doc{Tag::Concat, new std::vector<Doc>()};
         }
 
         auto &vec = this->cast<std::vector<Doc>>();
@@ -157,7 +160,7 @@ public:
     template <typename Rng>
     Doc &append(Rng &&rng) {
         if (this->tag() != Tag::Concat) {
-            *this = Doc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
+            *this = Doc{Tag::Concat, new std::vector<Doc>()};
         }
 
         auto begin = rng.begin();
@@ -217,7 +220,7 @@ private:
 public:
     template <typename... Docs>
     static Doc concat(Docs&&... rest) {
-        Doc acc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
+        Doc acc{Tag::Concat, new std::vector<Doc>()};
         acc.cast<std::vector<Doc>>().reserve(sizeof...(Docs));
         concat_impl(acc, std::forward<Docs>(rest)...);
         return acc;

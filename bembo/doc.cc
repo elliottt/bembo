@@ -192,12 +192,12 @@ Doc &Doc::operator=(Doc &&other) {
 Doc::Doc(Tag tag) : refs{nullptr}, value{static_cast<uint64_t>(tag)} {}
 
 // Initialization of a variant that lives in the heap.
-Doc::Doc(std::atomic<int> *refs, Tag tag, void *ptr) : refs{refs}, value{make_tagged(static_cast<uint16_t>(tag), ptr)} {
-    this->increment();
+Doc::Doc(Tag tag, void *ptr) : refs{new std::atomic<int>(1)}, value{make_tagged(static_cast<uint16_t>(tag), ptr)} {
+    assert(this->boxed());
 }
 
 Doc Doc::choice(Doc left, Doc right) {
-    return Doc{new std::atomic<int>(0), Tag::Choice, new Choice{std::move(left), std::move(right)}};
+    return Doc{Tag::Choice, new Choice{std::move(left), std::move(right)}};
 }
 
 // Construct a short text node. This assumes that the string is 8 chars or less.
@@ -218,11 +218,45 @@ std::string_view Doc::get_short_text() const {
     return std::string_view{this->short_text_data.data(), size};
 }
 
+bool Doc::init_short_str(std::string_view str) {
+    auto size = str.size();
+    if (str.size() > 8) {
+        return false;
+    }
+
+    this->value = static_cast<uint64_t>(Tag::ShortText) | static_cast<uint64_t>(size << TAG_MASK_BITS);
+    std::copy_n(str.begin(), size, this->short_text_data.begin());
+
+    return true;
+}
+
+void Doc::init_string(std::string str) {
+    this->refs = new std::atomic<int>(1);
+    this->value = make_tagged(static_cast<uint16_t>(Tag::Text), new Text{std::move(str)});
+}
+
 Doc::Doc() : Doc{Tag::Nil} {}
 
-Doc::Doc(const char *str) : Doc{Doc::s(str)} {}
+Doc::Doc(const char *str) : Doc{} {
+    auto view = std::string_view(str, strlen(str));
+    if (view.empty()) {
+        return;
+    }
 
-Doc::Doc(std::string_view str) : Doc{Doc::sv(str)} {}
+    if (!this->init_short_str(view)) {
+        this->init_string(std::string(view));
+    }
+}
+
+Doc::Doc(std::string_view str) : Doc{} {
+    if (str.empty()) {
+        return;
+    }
+
+    if (!this->init_short_str(str)) {
+        this->init_string(std::string(str));
+    }
+}
 
 Doc Doc::nil() {
     return Doc{};
@@ -245,15 +279,17 @@ Doc Doc::c(char c) {
 }
 
 Doc Doc::s(std::string str) {
+    Doc res{};
+
     if (str.empty()) {
-        return Doc::nil();
+        return res;
     }
 
-    if (str.size() <= 8) {
-        return Doc::short_text(str);
+    if (!res.init_short_str(str)) {
+        res.init_string(std::move(str));
     }
 
-    return Doc{new std::atomic<int>(0), Tag::Text, new Text{std::move(str)}};
+    return res;
 }
 
 Doc Doc::s(const char *str) {
@@ -266,7 +302,7 @@ Doc Doc::s(const char *str) {
         return Doc::short_text(std::string_view{str, len});
     }
 
-    return Doc{new std::atomic<int>(0), Tag::Text, new Text{str, len}};
+    return Doc{Tag::Text, new Text{str, len}};
 }
 
 Doc Doc::sv(std::string_view str) {
@@ -278,7 +314,7 @@ Doc Doc::sv(std::string_view str) {
         return Doc::short_text(str);
     }
 
-    return Doc{new std::atomic<int>(0), Tag::Text, new Text{str}};
+    return Doc{Tag::Text, new Text{str}};
 }
 
 Doc Doc::operator+(Doc other) const {
@@ -350,7 +386,7 @@ Doc Doc::flatten(Doc doc) {
 }
 
 Doc Doc::nest(int indent, Doc doc) {
-    return Doc{new std::atomic<int>(0), Tag::Nest, new Nest{std::move(doc), indent}};
+    return Doc{Tag::Nest, new Nest{std::move(doc), indent}};
 }
 
 namespace {

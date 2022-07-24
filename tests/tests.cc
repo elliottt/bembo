@@ -149,4 +149,16 @@ TEST_CASE("strings") {
     check_pretty("hi", "hi"sv);
 }
 
+TEST_CASE("moving") {
+    Doc foo = "hi";
+    foo = "there";
+    check_pretty("there", std::move(foo));
+}
+
+TEST_CASE("copying") {
+    Doc foo{"hi"};
+    Doc bar = foo;
+    check_pretty("hi", foo);
+}
+
 } // namespace bembo
