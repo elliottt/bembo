@@ -68,14 +68,6 @@ void *Doc::data() const {
     return reinterpret_cast<void *>(this->value >> METADATA_BITS);
 }
 
-template <typename T> T &Doc::cast() {
-    return *reinterpret_cast<T *>(this->data());
-}
-
-template <typename T> const T &Doc::cast() const {
-    return *reinterpret_cast<T *>(this->data());
-}
-
 bool Doc::boxed() const {
     return this->value & 0x1;
 }

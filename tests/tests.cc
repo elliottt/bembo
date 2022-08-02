@@ -120,6 +120,12 @@ TEST_CASE("xml") {
 
 TEST_CASE("concat") {
     check_pretty("ab", Doc::concat(Doc::sv("a"), Doc::sv("b")));
+    check_pretty("ab", Doc::concat(Doc::sv("a"), "b"));
+    check_pretty("ab", Doc::concat("a", "b"));
+}
+
+TEST_CASE("vcat") {
+    check_pretty("a\nb", Doc::vcat("a", "b"));
 }
 
 TEST_CASE("append") {

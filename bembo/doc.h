@@ -71,8 +71,13 @@ private:
     Tag tag() const;
     void *data() const;
 
-    template <typename T> T &cast();
-    template <typename T> const T &cast() const;
+    template <typename T> T &cast() {
+        return *reinterpret_cast<T *>(this->data());
+    }
+
+    template <typename T> const T &cast() const {
+        return *reinterpret_cast<T *>(this->data());
+    }
 
     bool boxed() const;
     void increment();
@@ -143,8 +148,7 @@ public:
     Doc &append(Doc other);
 
     // Append the contents of the range to this Doc by copying its elements.
-    template <typename InputIt, typename Sentinel>
-    Doc &append(InputIt &&begin, Sentinel &&end) {
+    template <typename InputIt, typename Sentinel> Doc &append(InputIt &&begin, Sentinel &&end) {
         if (this->tag() != Tag::Concat) {
             *this = Doc{Tag::Concat, new std::vector<Doc>()};
         }
@@ -157,8 +161,7 @@ public:
     }
 
     // Append the contents of the range to this Doc by copying its elements.
-    template <typename Rng>
-    Doc &append(Rng &&rng) {
+    template <typename Rng> Doc &append(Rng &&rng) {
         if (this->tag() != Tag::Concat) {
             *this = Doc{Tag::Concat, new std::vector<Doc>()};
         }
@@ -209,21 +212,36 @@ public:
     std::string pretty(int cols) const;
 
 private:
-    template <typename T, typename... Docs>
-    static void concat_impl(Doc &acc, T &&arg, Docs &&... rest) {
-        acc.append(std::move(arg));
+    template <typename T, typename... Docs> static void concat_impl(std::vector<Doc> &acc, T &&arg, Docs &&...rest) {
+        acc.emplace_back(std::move(arg));
         if constexpr (sizeof...(Docs) > 0) {
             concat_impl(acc, std::forward<Docs>(rest)...);
         }
     }
 
+    template <typename T, typename... Docs> static void vcat_impl(std::vector<Doc> &acc, T &&arg, Docs &&...rest) {
+        acc.emplace_back(std::move(arg));
+        if constexpr (sizeof...(Docs) > 0) {
+            acc.emplace_back(Doc::line());
+            vcat_impl(acc, std::forward<Docs>(rest)...);
+        }
+    }
+
 public:
-    template <typename... Docs>
-    static Doc concat(Docs&&... rest) {
-        Doc acc{Tag::Concat, new std::vector<Doc>()};
-        acc.cast<std::vector<Doc>>().reserve(sizeof...(Docs));
+    template <typename... Docs> static Doc concat(Docs &&...rest) {
+        Doc res{Tag::Concat, new std::vector<Doc>()};
+        auto &acc = res.cast<std::vector<Doc>>();
+        acc.reserve(sizeof...(Docs));
         concat_impl(acc, std::forward<Docs>(rest)...);
-        return acc;
+        return res;
+    }
+
+    template <typename... Docs> static Doc vcat(Docs &&...rest) {
+        Doc res{Tag::Concat, new std::vector<Doc>()};
+        auto &acc = res.cast<std::vector<Doc>>();
+        acc.reserve(sizeof...(Docs) + sizeof...(Docs) - 1);
+        vcat_impl(acc, std::forward<Docs>(rest)...);
+        return res;
     }
 
     static Doc angles(Doc doc);
