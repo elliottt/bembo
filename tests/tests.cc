@@ -122,6 +122,8 @@ TEST_CASE("concat") {
     check_pretty("ab", Doc::concat(Doc::sv("a"), Doc::sv("b")));
     check_pretty("ab", Doc::concat(Doc::sv("a"), "b"));
     check_pretty("ab", Doc::concat("a", "b"));
+
+    check_pretty("abcd", Doc::concat("a", Doc::concat("b", "c"), "d"));
 }
 
 TEST_CASE("vcat") {
@@ -141,6 +143,13 @@ TEST_CASE("append") {
         res.append(docs);
         check_pretty("abc", res);
     }
+
+    {
+        Doc res = Doc::concat("a", "b");
+        res.append(Doc::concat("c", "d"));
+        check_pretty("abcd", std::move(res));
+    }
+
 }
 
 TEST_CASE("flatten") {

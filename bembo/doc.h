@@ -1,6 +1,7 @@
 #ifndef BEMBO_DOC_H
 #define BEMBO_DOC_H
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -212,14 +213,14 @@ public:
     std::string pretty(int cols) const;
 
 private:
-    template <typename T, typename... Docs> static void concat_impl(std::vector<Doc> &acc, T &&arg, Docs &&...rest) {
+    template <typename... Docs> static void concat_impl(std::vector<Doc> &acc, Doc arg, Docs &&...rest) {
         acc.emplace_back(std::move(arg));
         if constexpr (sizeof...(Docs) > 0) {
             concat_impl(acc, std::forward<Docs>(rest)...);
         }
     }
 
-    template <typename T, typename... Docs> static void vcat_impl(std::vector<Doc> &acc, T &&arg, Docs &&...rest) {
+    template <typename... Docs> static void vcat_impl(std::vector<Doc> &acc, Doc arg, Docs &&...rest) {
         acc.emplace_back(std::move(arg));
         if constexpr (sizeof...(Docs) > 0) {
             acc.emplace_back(Doc::line());
