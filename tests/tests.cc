@@ -149,7 +149,6 @@ TEST_CASE("append") {
         res.append(Doc::concat("c", "d"));
         check_pretty("abcd", std::move(res));
     }
-
 }
 
 TEST_CASE("flatten") {
