@@ -99,13 +99,13 @@ TEST_CASE("stream output") {
 
 Doc tag(std::string_view name, Doc body = Doc::nil()) {
     if (body.is_nil()) {
-        return angles(Doc::sv(name) << Doc::c('/'));
+        return Doc::angles(Doc::sv(name) << Doc::c('/'));
     } else {
         auto tag = Doc::sv(name);
         return Doc::concat(
-            angles(tag),
+            Doc::angles(tag),
             Doc::group(Doc::concat(Doc::nest(2, Doc::softbreak() + body), Doc::softbreak())),
-            angles(Doc::c('/') + tag));
+            Doc::angles(Doc::c('/') + tag));
     }
 }
 
@@ -120,6 +120,14 @@ TEST_CASE("xml") {
 
 TEST_CASE("concat") {
     check_pretty("ab", Doc::concat(Doc::sv("a"), Doc::sv("b")));
+    check_pretty("ab", Doc::concat(Doc::sv("a"), "b"));
+    check_pretty("ab", Doc::concat("a", "b"));
+
+    check_pretty("abcd", Doc::concat("a", Doc::concat("b", "c"), "d"));
+}
+
+TEST_CASE("vcat") {
+    check_pretty("a\nb", Doc::vcat("a", "b"));
 }
 
 TEST_CASE("append") {
@@ -135,6 +143,12 @@ TEST_CASE("append") {
         res.append(docs);
         check_pretty("abc", res);
     }
+
+    {
+        Doc res = Doc::concat("a", "b");
+        res.append(Doc::concat("c", "d"));
+        check_pretty("abcd", std::move(res));
+    }
 }
 
 TEST_CASE("flatten") {
@@ -142,6 +156,23 @@ TEST_CASE("flatten") {
 
     check_pretty("a\nb\nc", d);
     check_pretty("a b c", Doc::flatten(d));
+}
+
+TEST_CASE("strings") {
+    check_pretty("hi", "hi");
+    check_pretty("hi", "hi"sv);
+}
+
+TEST_CASE("moving") {
+    Doc foo = "hi";
+    foo = "there";
+    check_pretty("there", std::move(foo));
+}
+
+TEST_CASE("copying") {
+    Doc foo{"hi"};
+    Doc bar = foo;
+    check_pretty("hi", foo);
 }
 
 } // namespace bembo

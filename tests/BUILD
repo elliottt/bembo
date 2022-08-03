@@ -8,4 +8,5 @@ cc_test(
         "@doctest//doctest",
         "@doctest//doctest:main",
     ],
+    visibility = ["//:__pkg__"],
 )

@@ -1,6 +1,7 @@
 #ifndef BEMBO_DOC_H
 #define BEMBO_DOC_H
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -71,8 +72,13 @@ private:
     Tag tag() const;
     void *data() const;
 
-    template <typename T> T &cast();
-    template <typename T> const T &cast() const;
+    template <typename T> T &cast() {
+        return *reinterpret_cast<T *>(this->data());
+    }
+
+    template <typename T> const T &cast() const {
+        return *reinterpret_cast<T *>(this->data());
+    }
 
     bool boxed() const;
     void increment();
@@ -83,12 +89,15 @@ private:
     bool is_flattened() const;
 
     Doc(Tag tag);
-    Doc(std::atomic<int> *refs, Tag tag, void *ptr);
+    Doc(Tag tag, void *ptr);
     static Doc choice(Doc left, Doc right);
 
     static Doc short_text(std::string_view text);
 
     std::string_view get_short_text() const;
+
+    bool init_short_str(std::string_view str);
+    void init_string(std::string str);
 
 public:
     ~Doc();
@@ -101,6 +110,12 @@ public:
 
     // Construct an empty doc.
     Doc();
+
+    // Construct a Doc from a string constant.
+    Doc(const char *str);
+
+    // Construct a Doc from a string constant.
+    Doc(std::string_view str);
 
     // Construct an empty doc.
     static Doc nil();
@@ -121,6 +136,9 @@ public:
     // A string.
     static Doc s(std::string str);
 
+    // A string.
+    static Doc s(const char *str);
+
     // A string, populated from a `std::string_view`.
     static Doc sv(std::string_view str);
 
@@ -131,10 +149,9 @@ public:
     Doc &append(Doc other);
 
     // Append the contents of the range to this Doc by copying its elements.
-    template <typename InputIt, typename Sentinel>
-    Doc &append(InputIt &&begin, Sentinel &&end) {
+    template <typename InputIt, typename Sentinel> Doc &append(InputIt &&begin, Sentinel &&end) {
         if (this->tag() != Tag::Concat) {
-            *this = Doc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
+            *this = Doc{Tag::Concat, new std::vector<Doc>()};
         }
 
         auto &vec = this->cast<std::vector<Doc>>();
@@ -145,10 +162,9 @@ public:
     }
 
     // Append the contents of the range to this Doc by copying its elements.
-    template <typename Rng>
-    Doc &append(Rng &&rng) {
+    template <typename Rng> Doc &append(Rng &&rng) {
         if (this->tag() != Tag::Concat) {
-            *this = Doc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
+            *this = Doc{Tag::Concat, new std::vector<Doc>()};
         }
 
         auto begin = rng.begin();
@@ -166,6 +182,15 @@ public:
 
     // Concatenate another doc with this one, with a space between.
     Doc operator<<(Doc other) const;
+
+    // Append another document to this one with a space between.
+    Doc &operator<<=(Doc other);
+
+    // Concatenate two Docs with a line between them.
+    Doc operator/(Doc other) const;
+
+    // Append a Doc after a newline.
+    Doc &operator/=(Doc other);
 
     // Adjust the indentation level in `other` by `indent`.
     static Doc nest(int indent, Doc other);
@@ -188,29 +213,45 @@ public:
     std::string pretty(int cols) const;
 
 private:
-    template <typename T, typename... Docs>
-    static void concat_impl(Doc &acc, T &&arg, Docs &&... rest) {
-        acc.append(std::move(arg));
+    template <typename... Docs> static void concat_impl(std::vector<Doc> &acc, Doc arg, Docs &&...rest) {
+        acc.emplace_back(std::move(arg));
         if constexpr (sizeof...(Docs) > 0) {
             concat_impl(acc, std::forward<Docs>(rest)...);
         }
     }
 
-public:
-    template <typename... Docs>
-    static Doc concat(Docs&&... rest) {
-        Doc acc{new std::atomic<int>(0), Tag::Concat, new std::vector<Doc>()};
-        acc.cast<std::vector<Doc>>().reserve(sizeof...(Docs));
-        concat_impl(acc, std::forward<Docs>(rest)...);
-        return acc;
+    template <typename... Docs> static void vcat_impl(std::vector<Doc> &acc, Doc arg, Docs &&...rest) {
+        acc.emplace_back(std::move(arg));
+        if constexpr (sizeof...(Docs) > 0) {
+            acc.emplace_back(Doc::line());
+            vcat_impl(acc, std::forward<Docs>(rest)...);
+        }
     }
 
-};
+public:
+    template <typename... Docs> static Doc concat(Docs &&...rest) {
+        Doc res{Tag::Concat, new std::vector<Doc>()};
+        auto &acc = res.cast<std::vector<Doc>>();
+        acc.reserve(sizeof...(Docs));
+        concat_impl(acc, std::forward<Docs>(rest)...);
+        return res;
+    }
 
-Doc angles(Doc doc);
-Doc braces(Doc doc);
-Doc quotes(Doc doc);
-Doc dquotes(Doc doc);
+    template <typename... Docs> static Doc vcat(Docs &&...rest) {
+        Doc res{Tag::Concat, new std::vector<Doc>()};
+        auto &acc = res.cast<std::vector<Doc>>();
+        acc.reserve(sizeof...(Docs) + sizeof...(Docs) - 1);
+        vcat_impl(acc, std::forward<Docs>(rest)...);
+        return res;
+    }
+
+    static Doc angles(Doc doc);
+    static Doc braces(Doc doc);
+    static Doc brackets(Doc doc);
+    static Doc quotes(Doc doc);
+    static Doc dquotes(Doc doc);
+    static Doc parens(Doc doc);
+};
 
 template <typename It, typename Sentinel> Doc join(It &&begin, Sentinel &&end) {
     return std::accumulate(std::forward<It>(begin), std::forward<Sentinel>(end), Doc::nil());
