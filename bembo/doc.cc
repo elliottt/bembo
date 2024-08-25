@@ -2,9 +2,10 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <vector>
 
-#include "doc.h"
+#include "bembo/doc.h"
 
 using namespace std::literals::string_view_literals;
 
@@ -371,7 +372,7 @@ Doc &Doc::flatten() {
     return *this;
 }
 
-Doc Doc::flatten(Doc doc) {
+Doc Doc::flatten(const Doc &doc) {
     Doc copy = doc;
     copy.flatten();
     return copy;
@@ -397,6 +398,7 @@ class Fits final {
 public:
     using Iterator = std::vector<Node>::const_reverse_iterator;
 
+private:
     const int width;
     int col;
 
@@ -404,127 +406,132 @@ public:
     Iterator it;
     Iterator end;
 
-    std::vector<Node> work;
+public:
+    Fits(int width, int col, Iterator it, Iterator end) : width{width}, col{col}, it{it}, end{end} {}
 
-    Fits(const int width, int col, Iterator it, Iterator end) : width{width}, col{col}, it{it}, end{end} {}
+    int get_width() const {
+        return this->width;
+    }
 
-    bool advance() {
+    int get_col() const {
+        return this->col;
+    }
+
+    std::optional<Node> next() {
         if (this->it == this->end) {
-            return false;
+            return {};
         }
 
-        this->work.emplace_back(*this->it);
+        auto node = *this->it;
         ++this->it;
 
-        return true;
+        return node;
     }
 
-    // Check to see if a Doc will fit in he space remaining on a line.
-    // NOTE: this check completely ignores indentation, as newlines terminate the check.
-    bool check(const Doc *doc, bool flattening) {
-        this->work.emplace_back(doc, 0, flattening || doc->is_flattened());
-
-        auto push = [this](Node &parent, const Doc *doc) {
-            this->work.emplace_back(doc, 0, parent.flattening || doc->is_flattened());
-        };
-
-        do {
-            while (!this->work.empty()) {
-                auto node = this->work.back();
-                this->work.pop_back();
-
-                switch (node.doc->tag()) {
-                case Doc::Tag::Nil:
-                    break;
-
-                case Doc::Tag::Line: {
-                    if (node.flattening) {
-                        this->col += 1;
-                    } else {
-                        return true;
-                    }
-                    break;
-                }
-
-                case Doc::Tag::ShortText: {
-                    auto text = node.doc->get_short_text();
-                    this->col += text.size();
-
-                    if (this->col > this->width) {
-                        return false;
-                    }
-                    break;
-                }
-
-                case Doc::Tag::Text: {
-                    auto &text = node.doc->cast<Text>();
-                    this->col += text.size();
-
-                    if (this->col > this->width) {
-                        return false;
-                    }
-
-                    break;
-                }
-
-                case Doc::Tag::Concat: {
-                    auto &cat = node.doc->cast<Concat>();
-                    for (auto it = cat.rbegin(); it != cat.rend(); ++it) {
-                        push(node, &*it);
-                    }
-                    break;
-                }
-
-                case Doc::Tag::Choice: {
-                    auto &choice = node.doc->cast<Choice>();
-                    // TODO: figure out how to avoid allocating a whole extra `Fits` here
-                    Fits nested{*this};
-                    if (nested.check(&choice.left, node.flattening || choice.left.is_flattened())) {
-                        push(node, &choice.left);
-                    } else {
-                        push(node, &choice.right);
-                    }
-                    break;
-                }
-
-                case Doc::Tag::Nest: {
-                    auto &nest = node.doc->cast<Nest>();
-                    push(node, &nest.doc);
-                    break;
-                }
-                }
-            }
-        } while (this->advance());
-
-        return true;
+    bool fits() const {
+        return this->col <= this->width;
     }
+
+    bool visit_text(std::string_view s) {
+        this->col += s.size();
+        return this->fits();
+    }
+
+    bool visit_line(int indent) {
+        return false;
+    }
+
+    static bool check(int width, int col, Iterator it, Iterator end, const Doc *doc, bool flattening);
 };
 
-class DocRenderer final {
-public:
+class DocRenderer {
+
     const int width;
     Writer &out;
 
-    int col = 0;
+    int col{0};
 
-    DocRenderer(const int width, Writer &out) : width{width}, out{out} {}
+public:
+    DocRenderer(int width, Writer &out) : width{width}, out{out} {}
 
-    std::vector<Node> work{};
+    int get_width() const {
+        return this->width;
+    }
 
-    void render(const Doc *doc);
+    int get_col() const {
+        return this->col;
+    }
+
+    // The renderer doesn't buffer any additional nodes.
+    std::optional<Node> next() {
+        return {};
+    }
+
+    bool visit_text(std::string_view s) {
+        this->out.write(s);
+        this->col += s.size();
+        return true;
+    }
+
+    bool visit_line(int indent) {
+        this->out.line(indent);
+        this->col = indent;
+        return true;
+    }
+
+    static void render(int cols, Writer &out, const Doc *doc);
 };
 
-void DocRenderer::render(const Doc *doc) {
+template <typename T> class DocVisitor {
+    std::vector<Node> work{};
+
+    T state;
+
+public:
+    DocVisitor(T &&state) : state{std::move(state)} {}
+
+    bool done();
+    Node next();
+
+    T *operator->() {
+        return &this->state;
+    }
+
+    void visit(const Doc *doc, bool flattening = false);
+};
+
+template <typename T> bool DocVisitor<T>::done() {
+    if (!this->work.empty()) {
+        return false;
+    }
+
+    if (auto next = this->state.next()) {
+        this->work.push_back(*next);
+        return false;
+    }
+
+    return true;
+}
+
+template <typename T> Node DocVisitor<T>::next() {
+    auto node = this->work.back();
+    this->work.pop_back();
+
+    return node;
+}
+
+template <typename T> void DocVisitor<T>::visit(const Doc *doc, bool flattening) {
     this->work.clear();
-    this->work.emplace_back(doc, 0, doc->is_flattened());
+
+    this->work.emplace_back(doc, 0, flattening || doc->is_flattened());
 
     auto push = [this](Node &parent, const Doc *doc) -> Node & {
         return this->work.emplace_back(doc, parent.indent, parent.flattening || doc->is_flattened());
     };
 
-    while (!this->work.empty()) {
-        auto node = this->work.back();
-        this->work.pop_back();
+    bool running = true;
+    while (running && !this->done()) {
+        auto node = this->next();
 
         switch (node.doc->tag()) {
         case Doc::Tag::Nil:
@@ -532,32 +539,27 @@ void DocRenderer::render(const Doc *doc) {
 
         case Doc::Tag::Line: {
             if (node.flattening) {
-                this->col += 1;
-                this->out.write(" ");
+                running = this->state.visit_text(" ");
             } else {
-                this->col = 0;
-                this->out.line(node.indent);
+                running = this->state.visit_line(node.indent);
             }
-
             break;
         }
 
         case Doc::Tag::ShortText: {
             auto text = node.doc->get_short_text();
-            this->col += text.size();
-            this->out.write(text);
+            running = this->state.visit_text(text);
             break;
         }
 
         case Doc::Tag::Text: {
-            auto &text = node.doc->cast<Text>();
-            this->col += text.size();
-            this->out.write(text);
+            auto &text = node.doc->template cast<Text>();
+            running = this->state.visit_text(text);
             break;
         }
 
         case Doc::Tag::Concat: {
-            auto &cat = node.doc->cast<Concat>();
+            auto &cat = node.doc->template cast<Concat>();
             for (auto it = cat.rbegin(); it != cat.rend(); ++it) {
                 push(node, &*it);
             }
@@ -565,12 +567,17 @@ void DocRenderer::render(const Doc *doc) {
         }
 
         case Doc::Tag::Choice: {
-            auto &choice = node.doc->cast<Choice>();
+            auto &choice = node.doc->template cast<Choice>();
             if (node.flattening) {
                 this->work.emplace_back(&choice.left, node.indent, true);
             } else {
-                Fits fit{this->width, this->col, this->work.rbegin(), this->work.rend()};
-                if (fit.check(&choice.left, node.flattening)) {
+                if (Fits::check(
+                        this->state.get_width(),
+                        this->state.get_col(),
+                        this->work.rbegin(),
+                        this->work.rend(),
+                        &choice.left,
+                        node.flattening)) {
                     push(node, &choice.left);
                 } else {
                     push(node, &choice.right);
@@ -580,13 +587,24 @@ void DocRenderer::render(const Doc *doc) {
         }
 
         case Doc::Tag::Nest: {
-            auto &nest = node.doc->cast<Nest>();
+            auto &nest = node.doc->template cast<Nest>();
             auto &next = push(node, &nest.doc);
             next.indent += nest.indent;
             break;
         }
         }
     }
+}
+
+bool Fits::check(int width, int col, Iterator it, Iterator end, const Doc *doc, bool flattening) {
+    DocVisitor<Fits> checker{Fits{width, col, it, end}};
+    checker.visit(doc, flattening);
+    return checker->fits();
+}
+
+void DocRenderer::render(int cols, Writer &out, const Doc *doc) {
+    DocVisitor<DocRenderer> renderer{DocRenderer{cols, out}};
+    renderer.visit(doc);
 }
 
 StreamWriter::StreamWriter(std::ostream &out) : out{out} {}
@@ -615,8 +633,7 @@ void StringWriter::write(std::string_view sv) {
 }
 
 void Doc::render(Writer &out, int cols) const {
-    DocRenderer r{cols, out};
-    r.render(this);
+    DocRenderer::render(cols, out, this);
 }
 
 std::string Doc::pretty(int cols) const {

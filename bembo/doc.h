@@ -48,6 +48,7 @@ class Doc final {
 private:
     friend class Fits;
     friend class DocRenderer;
+    template <typename T> friend class DocVisitor;
 
     // Shared refcount for when the tag of `data` doesn't indicate an inlined case.
     union {
@@ -199,7 +200,7 @@ public:
     static Doc group(Doc other);
 
     Doc &flatten();
-    static Doc flatten(Doc other);
+    static Doc flatten(const Doc &other);
 
     // True if this doc is empty.
     bool is_nil() const {
