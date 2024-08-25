@@ -10,3 +10,12 @@ the more flexible `render` function that takes an implementation of the `Writer`
 interface instead.
 
 [A Prettier Printer]: https://homepages.inf.ed.ac.uk/wadler/papers/prettier/prettier.pdf "A Prettier Printer"
+
+## Developing
+
+Run the following to generate a `compile_commands.json` in the top-level
+directory:
+
+```
+$ bazelisk run :refresh_compile_commands
+```
