@@ -9,4 +9,5 @@ cc_test(
         "@doctest//doctest:main",
     ],
     visibility = ["//:__pkg__"],
+    linkstatic = True,
 )
