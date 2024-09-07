@@ -1,4 +1,4 @@
-module(name = "tagged_ptr")
+module(name = "bembo")
 
 bazel_dep(name = "doctest", version = "2.4.11")
 bazel_dep(name = "hermetic_cc_toolchain", version = "3.1.0")
